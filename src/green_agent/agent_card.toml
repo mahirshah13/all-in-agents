@@ -1,0 +1,52 @@
+# Green Agent (Assessment Manager) Configuration
+# This agent coordinates poker evaluations and manages white agents
+
+[agent]
+name = "Poker Assessment Manager"
+description = "Green agent that coordinates poker evaluations and manages multiple white agents"
+version = "1.0.0"
+type = "assessment_manager"
+
+[capabilities]
+evaluation = true
+agent_management = true
+game_coordination = true
+metrics_collection = true
+tournament_management = true
+
+[communication]
+protocol = "a2a"
+endpoint = "http://localhost:8000"
+discovery_endpoint = "/.well-known/agent.json"
+
+[evaluation]
+# List of white agents to evaluate
+white_agents = [
+    { id = "openai_agent_1", name = "OpenAI Poker Agent 1", type = "openai", url = "http://localhost:8001" },
+    { id = "openai_agent_2", name = "OpenAI Poker Agent 2", type = "openai", url = "http://localhost:8002" }
+]
+
+# Evaluation settings
+games_per_agent = 10
+tournament_games = 5
+evaluation_timeout = 30
+
+[poker_rules]
+small_blind = 10
+big_blind = 20
+starting_chips = 1000
+max_players = 4
+hand_timeout = 30
+
+[metrics]
+track_win_rate = true
+track_chip_performance = true
+track_response_time = true
+track_strategy_metrics = true
+track_tournament_rankings = true
+
+[output]
+format = "terminal"
+show_progress = true
+show_agent_communication = true
+show_detailed_results = true

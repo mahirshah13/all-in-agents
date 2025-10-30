@@ -1,0 +1,180 @@
+"""White agent implementation - the target agent being tested."""
+
+import json
+import uvicorn
+import dotenv
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events import EventQueue
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentSkill, AgentCard, AgentCapabilities
+from a2a.utils import new_agent_text_message
+from litellm import completion
+
+
+dotenv.load_dotenv()
+
+
+def prepare_white_agent_card(url):
+    skill = AgentSkill(
+        id="task_fulfillment",
+        name="Task Fulfillment",
+        description="Handles user requests and completes tasks",
+        tags=["general"],
+        examples=[],
+    )
+    card = AgentCard(
+        name="file_agent",
+        description="Test agent from file",
+        url=url,
+        version="1.0.0",
+        default_input_modes=["text/plain"],
+        default_output_modes=["text/plain"],
+        capabilities=AgentCapabilities(),
+        skills=[skill],
+    )
+    return card
+
+
+class GeneralWhiteAgentExecutor(AgentExecutor):
+    def __init__(self):
+        self.ctx_id_to_messages = {}
+        self.ctx_id_to_game_state = {}
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        # parse the task
+        user_input = context.get_user_input()
+        if context.context_id not in self.ctx_id_to_messages:
+            self.ctx_id_to_messages[context.context_id] = []
+        messages = self.ctx_id_to_messages[context.context_id]
+        
+        # Check if this is a poker game state (JSON format)
+        try:
+            game_data = json.loads(user_input)
+            if "game_state" in game_data and "player_cards" in game_data:
+                # This is a poker game state, handle it specially
+                response = await self._handle_poker_decision(game_data, context.context_id)
+            else:
+                # Regular conversation
+                response = await self._handle_regular_conversation(user_input, context.context_id)
+        except json.JSONDecodeError:
+            # Regular conversation
+            response = await self._handle_regular_conversation(user_input, context.context_id)
+        
+        await event_queue.enqueue_event(
+            new_agent_text_message(
+                response, context_id=context.context_id
+            )
+        )
+
+    async def _handle_poker_decision(self, game_data: dict, context_id: str) -> str:
+        """Handle poker game decision with proper context"""
+        # Store current game state
+        self.ctx_id_to_game_state[context_id] = game_data
+        
+        # Build context-aware prompt
+        messages = self.ctx_id_to_messages[context_id]
+        
+        # Add system message if this is the first poker message
+        if not any(msg.get("role") == "system" for msg in messages):
+            messages.insert(0, {
+                "role": "system",
+                "content": """You are a poker-playing AI agent. You must respond ONLY with valid JSON in this exact format:
+{
+  "action": "fold|call|raise",
+  "amount": <number>,
+  "confidence": <0.0-1.0>,
+  "reasoning": "<brief explanation>"
+}
+
+CRITICAL: Respond with ONLY the JSON object. Do NOT wrap it in markdown code blocks, do NOT include any other text, explanations, or formatting. Just the raw JSON."""
+            })
+        
+        # Add current game state
+        messages.append({
+            "role": "user", 
+            "content": f"Poker game state: {json.dumps(game_data, indent=2)}"
+        })
+        
+        response = completion(
+            messages=messages,
+            model="openai/gpt-4o",
+            custom_llm_provider="openai",
+            temperature=0.1,  # Lower temperature for more consistent JSON
+        )
+        
+        next_message = response.choices[0].message.model_dump()
+        content = next_message["content"]
+        
+        # Clean up the response to ensure it's pure JSON
+        content = self._clean_json_response(content)
+        
+        messages.append({
+            "role": "assistant",
+            "content": content,
+        })
+        
+        return content
+
+    def _clean_json_response(self, content: str) -> str:
+        """Clean up the response to ensure it's pure JSON"""
+        import re
+        
+        # Remove markdown code blocks if present
+        content = re.sub(r'```(?:json)?\s*', '', content)
+        content = re.sub(r'```\s*$', '', content)
+        
+        # Remove any leading/trailing whitespace
+        content = content.strip()
+        
+        # Try to find JSON object in the response
+        json_match = re.search(r'\{[^{}]*"action"[^{}]*\}', content, re.DOTALL)
+        if json_match:
+            return json_match.group(0).strip()
+        
+        return content
+
+    async def _handle_regular_conversation(self, user_input: str, context_id: str) -> str:
+        """Handle regular conversation"""
+        messages = self.ctx_id_to_messages[context_id]
+        messages.append({
+            "role": "user",
+            "content": user_input,
+        })
+        
+        response = completion(
+            messages=messages,
+            model="openai/gpt-4o",
+            custom_llm_provider="openai",
+            temperature=0.0,
+        )
+        
+        next_message = response.choices[0].message.model_dump()
+        messages.append({
+            "role": "assistant",
+            "content": next_message["content"],
+        })
+        
+        return next_message["content"]
+
+    async def cancel(self, context, event_queue) -> None:
+        raise NotImplementedError
+
+
+def start_white_agent(agent_name="general_white_agent", host="localhost", port=9002):
+    print("Starting white agent...")
+    url = f"http://{host}:{port}"
+    card = prepare_white_agent_card(url)
+
+    request_handler = DefaultRequestHandler(
+        agent_executor=GeneralWhiteAgentExecutor(),
+        task_store=InMemoryTaskStore(),
+    )
+
+    app = A2AStarletteApplication(
+        agent_card=card,
+        http_handler=request_handler,
+    )
+
+    uvicorn.run(app.build(), host=host, port=port)

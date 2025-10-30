@@ -353,6 +353,13 @@ class PokerEngine:
     
     def _advance_round(self):
         """Advance to next betting round"""
+        # Check if only one player is active - if so, they win immediately
+        active_players = [p for p in self.game_state.players if p.is_active and p.chips > 0]
+        if len(active_players) <= 1:
+            self.game_state.round = "showdown"
+            self._determine_winner()
+            return
+        
         # Reset current bets
         for player in self.game_state.players:
             player.current_bet = 0

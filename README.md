@@ -1,290 +1,297 @@
-# Poker Evaluation Agent
+# Poker Agentify - Terminal-based Poker Agent Evaluation System
 
-A comprehensive system for evaluating poker-playing agents using the A2A (Agent-to-Agent) protocol. This system includes a poker game engine, A2A communication protocol, evaluation metrics, and a web-based dashboard for monitoring games and results.
+A terminal-based poker agent evaluation system inspired by the [agentify-example-tau-bench](https://github.com/agentbeats/agentify-example-tau-bench/tree/904ed9f80e7bcdd42abd3057e731350300b43961) approach. This system uses A2A (Agent-to-Agent) and MCP (Multi-Agent Communication Protocol) standards to evaluate multiple types of poker-playing agents.
 
-## Features
-
-- **Poker Game Engine**: Complete Texas Hold'em implementation with hand evaluation, betting rounds, and game state management
-- **A2A Protocol**: Agent-to-Agent communication protocol supporting both HTTP and WebSocket connections
-- **Evaluation Metrics**: Comprehensive metrics tracking including win rate, chip performance, playing style analysis, and response times
-- **Web Dashboard**: Real-time monitoring interface for games, agent management, and results visualization
-- **Example Agents**: Multiple example agents with different playing styles (Random, Conservative, Aggressive, Smart)
-
-## Architecture
+## Project Structure
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Dashboard │    │ Evaluation Agent│    │  Poker Agents   │
-│                 │    │                 │    │                 │
-│  - Agent Mgmt   │◄──►│  - Game Engine  │◄──►│  - Random       │
-│  - Game Control │    │  - A2A Protocol │    │  - Conservative │
-│  - Metrics      │    │  - Metrics      │    │  - Aggressive   │
-│  - Live Log     │    │  - Web Server   │    │  - Smart        │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+poker-agentify/
+├── src/
+│   ├── green_agent/           # Assessment manager agent
+│   │   ├── agent_card.toml    # Green agent configuration
+│   │   └── assessment_manager.py  # Main green agent implementation
+│   └── white_agent/           # Poker-playing agents
+│       ├── agent_card.toml    # White agent configuration
+│       └── poker_player.py    # Main white agent implementation
+├── launcher.py               # Unified launcher script
+├── main.py                   # Main entry point (delegates to launcher)
+├── poker_engine.py           # Poker game engine
+├── pyproject.toml            # Project dependencies
+├── env.example               # Environment variables template
+└── README.md                 # This file
 ```
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd "Green Agent"
-```
+1. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   # or
+   pip install -e .
+   ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Quick Start
-
-### 1. Start Example Agents
-
-First, start the example participating agents:
-
-```bash
-python example_agents.py
-```
-
-This will start 4 example agents on ports 8001-8004:
-- Random Agent (http://localhost:8001)
-- Conservative Agent (http://localhost:8002) 
-- Aggressive Agent (http://localhost:8003)
-- Smart Agent (http://localhost:8004)
-
-### 2. Start Evaluation Agent
-
-In a separate terminal, start the main evaluation agent:
-
-```bash
-python main.py
-```
-
-This will start:
-- Web dashboard at http://localhost:8000
-- A2A server at ws://localhost:8765
-
-### 3. Access Web Dashboard
-
-Open your browser and go to http://localhost:8000 to access the web dashboard where you can:
-- Register and manage agents
-- Start individual games or tournaments
-- Monitor real-time game progress
-- View detailed metrics and statistics
+2. **Set up environment variables:**
+   ```bash
+   cp env.example .env
+   # Edit .env with your actual values
+   ```
 
 ## Usage
 
-### Web Dashboard
+### Launch Complete Evaluation System
 
-The web dashboard provides a user-friendly interface for:
-
-1. **Agent Management**: Register new agents by providing their ID, name, and URL
-2. **Game Control**: Start individual games or tournaments with selected agents
-3. **Real-time Monitoring**: Watch games progress in real-time with live updates
-4. **Metrics Viewing**: Analyze agent performance with detailed statistics
-
-### Programmatic Usage
-
-You can also use the evaluation agent programmatically:
-
-```python
-from evaluation_agent import EvaluationAgent, AgentConfig, GameConfig
-
-# Create evaluation agent
-evaluation_agent = EvaluationAgent()
-
-# Register agents
-evaluation_agent.register_agent(AgentConfig(
-    id="my_agent",
-    name="My Poker Agent",
-    url="http://localhost:8005"
-))
-
-# Run a single game
-result = await evaluation_agent.run_single_game([
-    "http://localhost:8001",
-    "http://localhost:8002"
-])
-
-# Run a tournament
-tournament_result = await evaluation_agent.run_tournament([
-    "http://localhost:8001",
-    "http://localhost:8002",
-    "http://localhost:8003"
-], num_games=10)
+```bash
+# Launch the complete evaluation system (green agent + white agents + evaluation)
+python main.py
+# or directly
+python launcher.py
 ```
 
-## A2A Protocol
+### Launch Individual Components
 
-The A2A protocol enables communication between the evaluation agent and participating poker agents. Agents must implement the following message types:
+```bash
+# Start only the green agent A2A server
+python launcher.py --green-only
 
-### Message Types
-
-- `game_start`: Notifies agent that a game is starting
-- `action_request`: Requests an action from the agent
-- `action_response`: Agent's response with chosen action
-- `game_end`: Notifies agent that a game has ended
-- `ping`: Health check message
-- `pong`: Health check response
-
-### Message Format
-
-```json
-{
-    "message_type": "action_request",
-    "game_id": "game_123",
-    "player_id": "agent_1",
-    "data": {
-        "game_state": {
-            "round": "preflop",
-            "pot": 100,
-            "current_bet": 20,
-            "your_cards": ["A♠", "K♥"],
-            "community_cards": [],
-            "your_chips": 980,
-            "is_your_turn": true
-        }
-    },
-    "timestamp": 1234567890.123,
-    "message_id": "msg_456"
-}
+# Start only a white agent A2A server
+python launcher.py --white-only --agent-id random_1 --port 8001
 ```
 
-### Action Response Format
+### Running White Agents
 
-```json
-{
-    "action": "raise",
-    "amount": 60
-}
+To run white agents for A2A communication, start them in separate terminals:
+
+```bash
+# Terminal 1: Start Random Agent 1
+python launcher.py --white-only --agent-id random_1 --port 8001
+
+# Terminal 2: Start Random Agent 2  
+python launcher.py --white-only --agent-id random_2 --port 8002
+
+# Terminal 3: Start A2A Poker Agent
+python launcher.py --white-only --agent-id a2a_agent --port 8003
+
+# Terminal 4: Start OpenAI Poker Agent (with fallback if no API key)
+python launcher.py --white-only --agent-id openai_agent --port 8004
+
+# Terminal 5: Start Custom Strategy Agent
+python launcher.py --white-only --agent-id custom_agent --port 8005
 ```
 
-Valid actions:
-- `fold`: Fold the hand
-- `call`: Call the current bet
-- `raise`: Raise to specified amount
-- `check`: Check (if no bet to call)
-- `all_in`: Go all-in
+### OpenAI White Agent
 
-## Metrics
+The system includes a bare bones OpenAI-based poker playing agent that:
 
-The system tracks comprehensive metrics for each agent:
+- **Uses OpenAI GPT-4** for intelligent poker decision making
+- **Manages context** across multiple hands and sessions
+- **Falls back to random strategy** if no OpenAI API key is provided
+- **Learns from game history** and opponent behavior
+- **Provides detailed reasoning** for each decision
 
-### Performance Metrics
-- **Win Rate**: Percentage of hands won
-- **Net Chips**: Total chip gain/loss
-- **Games Played**: Number of games participated in
+#### Setting up OpenAI Agent
 
-### Playing Style Metrics
-- **VPIP**: Voluntarily Put money In Pot percentage
-- **PFR**: Pre-Flop Raise percentage
-- **Aggression Factor**: Ratio of raises to calls
-- **Fold Percentage**: How often the agent folds
-- **Call Percentage**: How often the agent calls
-- **Raise Percentage**: How often the agent raises
-- **All-in Percentage**: How often the agent goes all-in
+1. **Get an OpenAI API key** from [OpenAI Platform](https://platform.openai.com/api-keys)
 
-### Technical Metrics
-- **Average Response Time**: Mean time to respond to action requests
-- **Errors**: Number of communication errors
-- **Timeouts**: Number of timeout errors
+2. **Set the environment variable**:
+   ```bash
+   export OPENAI_API_KEY="your-api-key-here"
+   ```
 
-## Creating Custom Agents
+3. **Run the OpenAI agent**:
+   ```bash
+   # Using the launcher
+   python launcher.py --white-only --agent-id openai_agent --port 8004
+   
+   # Or using the example script
+   python example_openai_agent.py
+   ```
 
-To create your own poker agent, implement the A2A protocol:
+#### OpenAI Agent Features
 
-```python
-from fastapi import FastAPI
-import json
+- **Context Management**: Tracks game history, opponent behavior, and session performance
+- **Strategic Decision Making**: Uses GPT-4 to analyze game state and make optimal decisions
+- **Adaptive Play**: Adjusts strategy based on previous hands and outcomes
+- **Detailed Reasoning**: Provides explanations for each poker decision
+- **Fallback Strategy**: Uses intelligent random strategy if OpenAI is unavailable
 
-app = FastAPI()
+Then run the main system to evaluate all agents via A2A communication.
 
-@app.post("/")
-async def handle_message(request: dict):
-    message_type = request.get("message_type")
-    data = request.get("data", {})
-    
-    if message_type == "action_request":
-        game_state = data.get("game_state", {})
-        
-        # Your poker logic here
-        action = your_poker_strategy(game_state)
-        
-        return {
-            "message_type": "action_response",
-            "data": action,
-            "timestamp": request.get("timestamp"),
-            "message_id": request.get("message_id")
-        }
-    
-    # Handle other message types...
-    return {"success": True}
-```
+## A2A Agent Structure
+
+The `PokerAssessmentManager` is a proper A2A agent with the following methods:
+
+- **`__init__(config)`**: Initialize the agent with configuration
+- **`execute(context, event_queue)`**: Main execution method for handling A2A requests
+- **`cancel(context, event_queue)`**: Cancel any active evaluations
+- **`start_a2a_server()`**: Start the A2A server for external communication
+- **`_run_a2a_evaluation()`**: Run evaluation using A2A communication with white agents
+- **`_run_a2a_tournament()`**: Run tournament using A2A communication with white agents
+
+The system operates in A2A mode:
+1. **Green Agent A2A Server**: Starts A2A server to receive evaluation requests
+2. **White Agent Communication**: Uses A2A protocol to communicate with white agents
+3. **Evaluation Process**: Runs actual poker evaluations through A2A calls
+4. **Results Output**: Generates comprehensive evaluation reports
 
 ## Configuration
 
-The system can be configured through the `config.py` file:
+### Green Agent Configuration (`src/green_agent/agent_card.toml`)
 
-- **Server Config**: Host, ports, logging level
-- **Game Config**: Blinds, starting chips, timeouts
-- **Agent Config**: Timeouts, retry settings
-- **Evaluation Config**: Metrics update intervals, concurrent games
+The green agent (assessment manager) configuration includes:
 
-## API Endpoints
+- **Agent metadata**: name, description, version, type
+- **Capabilities**: evaluation, agent_management, game_coordination, etc.
+- **White agents list**: agents to evaluate with their URLs and types
+- **Evaluation settings**: games per agent, tournament games, timeouts
+- **Poker rules**: blinds, starting chips, max players
+- **Metrics tracking**: what to measure and track
+- **Output format**: terminal display preferences
 
-### Web API
-- `GET /api/agents` - List registered agents
-- `POST /api/agents` - Register new agent
-- `DELETE /api/agents/{agent_id}` - Unregister agent
-- `GET /api/metrics` - Get agent metrics
-- `POST /api/games/start` - Start a game
-- `POST /api/tournaments/start` - Start a tournament
-- `GET /api/games/active` - Get active games
+### White Agent Configuration (`src/white_agent/agent_card.toml`)
 
-### WebSocket
-- `ws://localhost:8000/ws` - Real-time updates
+The white agent (poker player) configuration includes:
+
+- **Agent metadata**: name, description, version, type
+- **Poker strategy**: strategy type, bluff frequency, aggression factor
+- **Game interface**: expected inputs and output format
+- **Decision parameters**: fold/call/raise thresholds
+- **Evaluation criteria**: performance targets and metrics
+
+## Agent Types
+
+### Supported White Agent Types
+
+1. **Random**: Makes random poker decisions
+2. **Conservative**: Folds more often, smaller bets
+3. **Aggressive**: Bets more often, larger amounts
+4. **Smart**: Considers multiple factors (cards, position, pot odds)
+5. **A2A**: Communicates via A2A protocol
+6. **OpenAI**: Uses OpenAI API for decision making
+7. **Custom**: User-defined strategy
+
+### White Agent Inputs/Outputs
+
+#### Expected Inputs from Green Agent:
+- `game_state`: Current game phase and state
+- `player_cards`: Player's hole cards
+- `community_cards`: Community cards (flop, turn, river)
+- `pot_size`: Current pot size
+- `current_bet`: Current bet amount
+- `player_position`: Player position (button, early, etc.)
+- `action_required`: What action is required (fold/call/raise)
+
+#### Output Format for White Agent:
+```json
+{
+  "action": "fold|call|raise",
+  "amount": 60,
+  "confidence": 0.8,
+  "reasoning": "Strong starting hand, raising to build pot"
+}
+```
+
+## Example Usage
+
+### Basic Evaluation
+
+```bash
+# Start the complete system
+python main.py launch
+```
+
+This will:
+1. Launch the green agent (assessment manager)
+2. Launch all configured white agents
+3. Run individual evaluations for each agent
+4. Run a tournament between all agents
+5. Display final results and rankings
+
+### Custom Evaluation
+
+You can modify the `src/green_agent/agent_card.toml` file to:
+- Add/remove white agents
+- Change evaluation parameters
+- Modify poker rules
+- Adjust metrics tracking
+
+## Output Format
+
+The system provides tau-bench style terminal output:
+
+```
+🃏 Poker Agentify - Terminal-based Poker Agent Evaluation
+============================================================
+Green Agent: Assessment Manager (Evaluator)
+White Agents: Poker Playing Agents
+Starting evaluation system...
+============================================================
+
+✅ Launching green agent...
+✅ Green agent is ready.
+✅ Launching white agents...
+✅ White agents are ready.
+
+ℹ️  Starting evaluation...
+@@@ Green agent: Sending message to Random Agent 1... -->
+
+# Poker Agent Evaluation Task
+...
+
+@@@ Random Agent 1 response:
+{
+  "action": "raise",
+  "amount": 60,
+  "confidence": 0.8,
+  "reasoning": "Strong starting hand"
+}
+
+✅ Evaluation completed for Random Agent 1
+   Win Rate: 45.00%
+   Net Chips: +150
+   Performance Score: 67.5
+
+🏆 Final Tournament Rankings:
+  1. Smart Agent - 3 wins, 2800 chips (60.0% win rate)
+  2. Aggressive Agent - 2 wins, 2200 chips (40.0% win rate)
+  3. Random Agent 1 - 1 wins, 1800 chips (20.0% win rate)
+```
 
 ## Development
 
-### Project Structure
-```
-Green Agent/
-├── main.py                 # Main application entry point
-├── evaluation_agent.py     # Core evaluation agent
-├── poker_engine.py         # Poker game engine
-├── a2a_protocol.py         # A2A communication protocol
-├── web_interface.py        # Web dashboard
-├── example_agents.py       # Example participating agents
-├── config.py              # Configuration settings
-├── requirements.txt        # Python dependencies
-└── README.md              # This file
-```
+### Adding New Agent Types
 
-### Running Tests
+1. **Create agent implementation** in `src/white_agent/`
+2. **Add agent configuration** to `src/green_agent/agent_card.toml`
+3. **Update strategy handler** in `assessment_manager.py`
 
-```bash
-# Run example agents for testing
-python example_agents.py
+### Customizing Evaluation
 
-# Run evaluation agent
-python main.py
+1. **Modify poker rules** in green agent config
+2. **Adjust metrics tracking** in configuration
+3. **Change output format** preferences
 
-# Access web dashboard
-open http://localhost:8000
-```
+## Architecture
 
-## Contributing
+### Green Agent (Assessment Manager)
+- **Role**: Coordinates evaluations, manages white agents
+- **Capabilities**: Agent registration, game management, metrics collection
+- **Communication**: A2A protocol for agent communication
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+### White Agents (Poker Players)
+- **Role**: Play poker games, make decisions
+- **Types**: Random, Conservative, Aggressive, Smart, A2A, OpenAI, Custom
+- **Interface**: Standardized input/output format
+
+### Launcher (Evaluation Coordinator)
+- **Role**: Orchestrates the complete evaluation process
+- **Functions**: Start agents, coordinate evaluation, display results
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License - see LICENSE file for details
 
-## Support
+## References
 
-For questions, issues, or contributions, please open an issue on the GitHub repository.
+- [Agentify Example: Tau-Bench](https://github.com/agentbeats/agentify-example-tau-bench/tree/904ed9f80e7bcdd42abd3057e731350300b43961)
+- [A2A Protocol Documentation](https://github.com/google/a2a-sdk)
+- [MCP Standards](https://github.com/modelcontextprotocol)
