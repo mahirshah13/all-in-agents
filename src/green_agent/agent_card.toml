@@ -23,12 +23,14 @@ discovery_endpoint = "/.well-known/agent.json"
 # List of white agents to evaluate
 white_agents = [
     { id = "openai_agent_1", name = "OpenAI Poker Agent 1", type = "openai", url = "http://localhost:8001" },
-    { id = "openai_agent_2", name = "OpenAI Poker Agent 2", type = "openai", url = "http://localhost:8002" }
+    { id = "openai_agent_2", name = "OpenAI Poker Agent 2", type = "openai", url = "http://localhost:8002" },
+    { id = "openai_agent_3", name = "OpenAI Poker Agent 3", type = "openai", url = "http://localhost:8003" },
+    { id = "openai_agent_4", name = "OpenAI Poker Agent 4", type = "openai", url = "http://localhost:8004" }
 ]
 
 # Evaluation settings
-games_per_agent = 10
-tournament_games = 5
+games_per_agent = 3
+tournament_games = 3
 evaluation_timeout = 30
 
 [poker_rules]
