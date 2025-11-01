@@ -38,9 +38,18 @@ def prepare_white_agent_card(url):
 
 
 class GeneralWhiteAgentExecutor(AgentExecutor):
+    """
+    White agent executor that maintains conversation state per context_id.
+    
+    State Management:
+    - Each context_id maintains its own conversation history in ctx_id_to_messages
+    - When green agent creates a new context_id (e.g., for a new tournament),
+      this automatically starts a fresh conversation thread
+    - Old context_ids remain in memory but won't be accessed after reset
+    """
     def __init__(self):
-        self.ctx_id_to_messages = {}
-        self.ctx_id_to_game_state = {}
+        self.ctx_id_to_messages = {}  # Maps context_id -> list of messages (conversation history)
+        self.ctx_id_to_game_state = {}  # Maps context_id -> current game state
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         # parse the task

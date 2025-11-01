@@ -103,7 +103,7 @@ async def start_full_system():
             
             # Start white agent in background process
             process = subprocess.Popen([
-                "python", "launcher.py", 
+                sys.executable, "launcher.py", 
                 "--white-only", 
                 "--agent-id", agent_id, 
                 "--port", str(port)

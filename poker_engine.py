@@ -99,6 +99,8 @@ class PokerEngine:
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.game_state: Optional[GameState] = None
+        self.dealer_position: int = 0  # Track dealer position across hands
+        self.hand_number: int = 0  # Track hand number across games
         
     def create_deck(self) -> List[Card]:
         """Create a standard 52-card deck"""
@@ -119,18 +121,33 @@ class PokerEngine:
         return dealt, remaining
     
     def start_new_hand(self, player_ids: List[str], player_names: List[str], 
-                      starting_chips: int = 1000) -> GameState:
-        """Start a new poker hand"""
-        # Create players
+                      starting_chips: int = 1000, preserve_chips: bool = False) -> GameState:
+        """Start a new poker hand with rotating blinds"""
+        # Increment hand number
+        self.hand_number += 1
+        
+        # Create players (preserve chips if continuing a game, otherwise start fresh)
         players = []
+        player_chips = {}
+        if preserve_chips and self.game_state is not None:
+            # Preserve chip counts from previous hand
+            for player in self.game_state.players:
+                player_chips[player.id] = player.chips
+        
         for i, (pid, name) in enumerate(zip(player_ids, player_names)):
+            chips = player_chips.get(pid, starting_chips) if preserve_chips else starting_chips
             players.append(Player(
                 id=pid,
                 name=name,
-                chips=starting_chips,
+                chips=chips,
                 cards=[],
                 position=i
             ))
+        
+        # Rotate dealer position (only rotate if we have existing game state)
+        # For first hand, dealer starts at 0, then rotates after each hand
+        if self.game_state is not None and len(players) > 0:
+            self.dealer_position = (self.dealer_position + 1) % len(players)
         
         # Create and shuffle deck
         deck = self.shuffle_deck(self.create_deck())
@@ -141,16 +158,16 @@ class PokerEngine:
             community_cards=[],
             pot=0,
             current_bet=0,
-            dealer_position=0,
-            current_player=1,  # Small blind starts first
+            dealer_position=self.dealer_position,
+            current_player=1,  # Will be set correctly in _post_blinds
             round="preflop",
             deck=deck,
             small_blind=self.small_blind,
             big_blind=self.big_blind,
-            hand_number=1
+            hand_number=self.hand_number
         )
         
-        # Post blinds
+        # Post blinds (this will set current_player correctly)
         self._post_blinds()
         
         # Deal hole cards

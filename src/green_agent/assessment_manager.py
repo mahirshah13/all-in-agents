@@ -52,6 +52,86 @@ class GameResult:
 
 
 @dataclass
+class AgentMetrics:
+    """Detailed metrics for an agent's playing style"""
+    # Basic action counts
+    folds: int = 0
+    calls: int = 0
+    raises: int = 0
+    bets: int = 0
+    checks: int = 0
+    
+    # Hand participation
+    hands_participated: int = 0  # Hands where player put money in (VPIP)
+    hands_voluntarily_played: int = 0  # Hands not in blind positions
+    
+    # Preflop actions
+    preflop_raises: int = 0
+    preflop_actions: int = 0
+    
+    # 3-bet situations
+    faced_3bet: int = 0
+    folded_to_3bet: int = 0
+    
+    # Position tracking
+    positions: List[int] = None  # List of positions played
+    hands_by_position: Dict[str, int] = None  # Hands played by position
+    wins_by_position: Dict[str, int] = None  # Wins by position
+    
+    # Showdown tracking
+    showdown_winnings: int = 0  # Chips won at showdown
+    non_showdown_winnings: int = 0  # Chips won without showdown
+    
+    def __post_init__(self):
+        if self.positions is None:
+            self.positions = []
+        if self.hands_by_position is None:
+            self.hands_by_position = {}
+        if self.wins_by_position is None:
+            self.wins_by_position = {}
+    
+    def calculate_af(self) -> float:
+        """Aggression Factor: (raises + bets) / calls"""
+        if self.calls == 0:
+            return float('inf') if (self.raises + self.bets) > 0 else 0.0
+        return (self.raises + self.bets) / self.calls
+    
+    def calculate_vpip(self) -> float:
+        """VPIP: Percentage of hands voluntarily put money in pot"""
+        if self.hands_participated == 0:
+            return 0.0
+        return (self.hands_voluntarily_played / self.hands_participated) * 100
+    
+    def calculate_pfr(self) -> float:
+        """Preflop Raise: Percentage of preflop raises"""
+        if self.preflop_actions == 0:
+            return 0.0
+        return (self.preflop_raises / self.preflop_actions) * 100
+    
+    def calculate_fold_to_3bet(self) -> float:
+        """Fold to 3-Bet percentage"""
+        if self.faced_3bet == 0:
+            return 0.0
+        return (self.folded_to_3bet / self.faced_3bet) * 100
+    
+    def get_positional_win_rate(self) -> Dict[str, float]:
+        """Win rate by position"""
+        win_rates = {}
+        for position in self.hands_by_position:
+            hands = self.hands_by_position.get(position, 0)
+            wins = self.wins_by_position.get(position, 0)
+            win_rates[position] = (wins / hands * 100) if hands > 0 else 0.0
+        return win_rates
+    
+    def get_showdown_ratio(self) -> float:
+        """Ratio of showdown winnings to total winnings"""
+        total = self.showdown_winnings + self.non_showdown_winnings
+        if total == 0:
+            return 0.0
+        return self.showdown_winnings / total
+
+
+@dataclass
 class EvaluationResult:
     """Result of evaluating an agent"""
     agent_id: str
@@ -64,6 +144,11 @@ class EvaluationResult:
     net_chips: int
     average_response_time: float
     performance_score: float
+    metrics: Optional[AgentMetrics] = None
+    
+    def __post_init__(self):
+        if self.metrics is None:
+            self.metrics = AgentMetrics()
 
 
 class PokerAssessmentManager(AgentExecutor):
@@ -97,6 +182,7 @@ class PokerAssessmentManager(AgentExecutor):
 
         # Initialize evaluation results
         self.evaluation_results: Dict[str, EvaluationResult] = {}
+        self.agent_metrics: Dict[str, AgentMetrics] = {}
         self.poker_engine = PokerEngine(
             small_blind=self.poker_rules["small_blind"],
             big_blind=self.poker_rules["big_blind"]
@@ -113,6 +199,14 @@ class PokerAssessmentManager(AgentExecutor):
         
         # Context management for maintaining conversation history with each agent
         self.agent_contexts: Dict[str, str] = {}
+        
+        # State management for white agents
+        # Track whether each agent has been initialized (task description sent)
+        self.agent_initialized: Dict[str, bool] = {}
+        # Track current tournament/session ID for state management
+        self.current_tournament_id: Optional[str] = None
+        # Track agent memory/summaries across tournaments (optional)
+        self.agent_memory: Dict[str, List[str]] = {}
         
         # Log configuration values being used
         self.logger.info(f"Configuration loaded:")
@@ -263,7 +357,15 @@ Please respond with your poker decisions in the specified JSON format."""
         """Run evaluation using A2A communication with white agents"""
         self.print_status("Starting A2A-based poker evaluation...")
         
-        # Give context to white agents via A2A
+        # Reset all agent states before starting (fresh tournament)
+        await self.reset_all_agent_states(clear_memory=False)
+        
+        # Generate new tournament ID
+        import uuid
+        self.current_tournament_id = str(uuid.uuid4())
+        self.logger.info(f"Starting tournament {self.current_tournament_id[:8]}...")
+        
+        # Initialize agents (send task description)
         await self._give_context_to_white_agents_a2a()
         
         # Run tournament with real poker games
@@ -271,12 +373,27 @@ Please respond with your poker decisions in the specified JSON format."""
         
         # Show final results
         self._print_final_report()
+        
+        # Optional: Reset states after tournament (for next tournament)
+        # Comment out if you want agents to remember across tournaments
+        # await self.reset_all_agent_states(clear_memory=False)
 
     async def _run_a2a_tournament(self, task_data: Dict[str, Any]):
         """Run tournament using A2A communication with white agents"""
         self.print_status("Starting A2A-based poker tournament...")
         
-        # Send tournament task description via A2A
+        # Reset all agent states before starting (fresh tournament)
+        await self.reset_all_agent_states(clear_memory=False)
+        
+        # Generate new tournament ID
+        import uuid
+        self.current_tournament_id = str(uuid.uuid4())
+        self.logger.info(f"Starting tournament {self.current_tournament_id[:8]}...")
+        
+        # Initialize agents with task description
+        await self._give_context_to_white_agents_a2a()
+        
+        # Send tournament-specific description via A2A (as additional context)
         tournament_description = self._create_tournament_task_description()
         await self._send_message_to_all_agents_a2a("Tournament Participants", tournament_description)
         
@@ -285,21 +402,101 @@ Please respond with your poker decisions in the specified JSON format."""
         
         # Show final results
         self._print_final_report()
+        
+        # Optional: Reset states after tournament (for next tournament)
+        # Comment out if you want agents to remember across tournaments
+        # await self.reset_all_agent_states(clear_memory=False)
 
-    async def _give_context_to_white_agents_a2a(self):
-        """Give context to white agents via A2A communication"""
-        self.print_status("Giving context to white agents via A2A...")
+    async def initialize_agent_state(self, agent_id: str, send_task_description: bool = True):
+        """Initialize state for a specific agent (only sends task description if needed)"""
+        agent = self.white_agents.get(agent_id)
+        if not agent:
+            self.logger.error(f"Agent {agent_id} not found")
+            return
         
-        # Create poker task description
-        task_description = self._create_poker_task_description()
+        # Create or get context ID for this agent
+        if agent_id not in self.agent_contexts:
+            import uuid
+            self.agent_contexts[agent_id] = str(uuid.uuid4())
         
-        for agent_id, agent in self.white_agents.items():            
-            # Send message via A2A
+        # Send task description only if not already initialized or if explicitly requested
+        if send_task_description and not self.agent_initialized.get(agent_id, False):
+            task_description = self._create_poker_task_description()
             try:
                 response = await self._send_message_to_agent_a2a(agent, task_description)
-                self.print_agent_response(agent.name, response)
+                self.agent_initialized[agent_id] = True
+                context_id = self.agent_contexts[agent_id]
+                self.logger.info(f"Initialized agent {agent.name} with context ID {context_id}")
+                print(f"   ✅ {agent.name}: Initialized with context ID {context_id[:16]}...")
             except Exception as e:
-                self.print_status(f"Failed to communicate with {agent.name}: {e}", "ERROR")
+                self.logger.error(f"Failed to initialize {agent.name}: {e}")
+                raise
+    
+    async def reset_agent_state(self, agent_id: str, clear_memory: bool = False):
+        """Reset state for a specific agent between tournaments"""
+        agent = self.white_agents.get(agent_id)
+        if not agent:
+            self.logger.error(f"Agent {agent_id} not found")
+            return
+        
+        # Generate new context ID to start fresh conversation
+        import uuid
+        old_context_id = self.agent_contexts.get(agent_id)
+        new_context_id = str(uuid.uuid4())
+        self.agent_contexts[agent_id] = new_context_id
+        
+        # Mark as not initialized so task description will be sent again
+        self.agent_initialized[agent_id] = False
+        
+        # Optionally clear memory
+        if clear_memory and agent_id in self.agent_memory:
+            self.agent_memory[agent_id] = []
+        
+        if old_context_id:
+            self.logger.info(f"Reset state for agent {agent.name} (old context: {old_context_id[:8]}..., new: {new_context_id[:8]}...)")
+            print(f"   🔄 {agent.name}: Context ID reset ({old_context_id[:8]}... → {new_context_id[:8]}...)")
+        else:
+            self.logger.info(f"Created new context for agent {agent.name}: {new_context_id[:8]}...")
+            print(f"   ✅ {agent.name}: New context ID created ({new_context_id[:8]}...)")
+    
+    async def reset_all_agent_states(self, clear_memory: bool = False):
+        """Reset state for all agents (e.g., before a new tournament)"""
+        self.print_status("Resetting all agent states for new tournament...", "INFO")
+        print("🔄 State Management: Generating new context IDs for all agents...")
+        for agent_id in self.white_agents.keys():
+            await self.reset_agent_state(agent_id, clear_memory=clear_memory)
+        self.print_status(f"All {len(self.white_agents)} agents reset with new context IDs", "SUCCESS")
+    
+    async def share_tournament_summary(self, agent_id: str, summary: str):
+        """Share tournament summary with an agent for learning (optional)"""
+        agent = self.white_agents.get(agent_id)
+        if not agent:
+            self.logger.error(f"Agent {agent_id} not found")
+            return
+        
+        # Store in memory
+        if agent_id not in self.agent_memory:
+            self.agent_memory[agent_id] = []
+        self.agent_memory[agent_id].append(summary)
+        
+        # Optionally send to agent via A2A for learning
+        # Uncomment if you want agents to receive tournament summaries
+        # try:
+        #     summary_message = f"Tournament Summary:\n{summary}"
+        #     await self._send_message_to_agent_a2a(agent, summary_message)
+        # except Exception as e:
+        #     self.logger.warning(f"Failed to share summary with {agent.name}: {e}")
+    
+    async def _give_context_to_white_agents_a2a(self):
+        """Give context to white agents via A2A communication (only sends if not already initialized)"""
+        self.print_status("Initializing white agents via A2A...")
+        
+        for agent_id, agent in self.white_agents.items():
+            # Initialize agent state (only sends task description if not already sent)
+            try:
+                await self.initialize_agent_state(agent_id, send_task_description=True)
+            except Exception as e:
+                self.print_status(f"Failed to initialize {agent.name}: {e}", "ERROR")
                 raise e  # Don't simulate, fail if can't communicate
             
             # Small delay between agents
@@ -408,6 +605,8 @@ Please respond with your poker decisions in the specified JSON format."""
     async def _run_tournament_a2a(self):
         """Run tournament between all agents via A2A"""
         self.print_status("Starting A2A tournament...")
+        if self.current_tournament_id:
+            self.logger.info(f"Tournament ID: {self.current_tournament_id[:8]}...")
         
         agent_ids = list(self.white_agents.keys())
         num_games = self.evaluation_config["tournament_games"]
@@ -416,7 +615,23 @@ Please respond with your poker decisions in the specified JSON format."""
         tournament_stats = {aid: {"wins": 0, "total_chips": 0, "hands_won": 0, "total_hands": 0} for aid in agent_ids}
         
         for game_num in range(num_games):
-            self.print_status(f"Tournament Game {game_num + 1}/{num_games}")
+            # Reset agent states between tournaments to give fresh context
+            if game_num > 0:  # Don't reset before first game (already done in _run_a2a_evaluation)
+                import uuid
+                # Generate new tournament ID for each tournament
+                self.current_tournament_id = str(uuid.uuid4())
+                print(f"🏆 New Tournament ID: {self.current_tournament_id[:16]}...")
+                
+                print("\n" + "="*70)
+                print("🔄 Resetting agent states for next tournament...")
+                await self.reset_all_agent_states(clear_memory=False)
+                
+                # Re-initialize agents with task description for new tournament
+                await self._give_context_to_white_agents_a2a()
+                
+            print("\n" + "="*70)
+            print(f"🏆 TOURNAMENT GAME {game_num + 1} of {num_games}")
+            print("="*70)
             
             # Run actual poker game with A2A communication
             game_result = await self._run_poker_game_a2a(agent_ids)
@@ -442,6 +657,9 @@ Please respond with your poker decisions in the specified JSON format."""
             stats = tournament_stats[aid]
             agent = self.white_agents[aid]
             
+            # Get metrics for this agent
+            agent_metrics = self.agent_metrics.get(aid, AgentMetrics())
+            
             self.evaluation_results[aid] = EvaluationResult(
                 agent_id=aid,
                 agent_name=agent.name,
@@ -452,7 +670,8 @@ Please respond with your poker decisions in the specified JSON format."""
                 win_rate=stats["hands_won"] / stats["total_hands"] if stats["total_hands"] > 0 else 0,
                 net_chips=stats["total_chips"] - (num_games * self.poker_rules.get("starting_chips", 1000)),  # Starting chips per game
                 average_response_time=0.0,  # TODO: Track actual response times
-                performance_score=self._calculate_performance_score(stats["hands_won"], stats["total_hands"], stats["total_chips"] - (num_games * self.poker_rules.get("starting_chips", 1000)))
+                performance_score=self._calculate_performance_score(stats["hands_won"], stats["total_hands"], stats["total_chips"] - (num_games * self.poker_rules.get("starting_chips", 1000))),
+                metrics=agent_metrics
             )
         
         # Show tournament results
@@ -475,13 +694,38 @@ Please respond with your poker decisions in the specified JSON format."""
             # Play multiple hands until one player is eliminated or max hands reached
             max_hands = self.evaluation_config.get("games_per_agent", 10)
             for hand_num in range(max_hands):
-                self.print_status(f"Playing hand {hand_num + 1}")
+                print("\n" + "="*70)
+                print(f"🃏 HAND {hand_num + 1} of {max_hands}")
+                print("="*70)
                 
-                # Start new hand with all agents
+                # Start new hand with all agents (preserve chips between hands)
                 agent_names = [self.white_agents[aid].name for aid in agent_ids]
                 starting_chips = self.poker_rules.get("starting_chips", 1000)
-                self.poker_engine.start_new_hand(agent_ids, agent_names, starting_chips)
+                preserve_chips = (hand_num > 0)  # Preserve chips after first hand
+                self.poker_engine.start_new_hand(agent_ids, agent_names, starting_chips, preserve_chips=preserve_chips)
                 total_hands += 1
+                
+                # Show dealer and blind positions
+                game_state = self.poker_engine.game_state
+                dealer_pos = game_state.dealer_position
+                sb_pos = (dealer_pos + 1) % len(game_state.players)
+                bb_pos = (dealer_pos + 2) % len(game_state.players)
+                
+                dealer_name = self.white_agents[game_state.players[dealer_pos].id].name
+                sb_name = self.white_agents[game_state.players[sb_pos].id].name
+                bb_name = self.white_agents[game_state.players[bb_pos].id].name
+                
+                print(f"\n🎰 Positions:")
+                print(f"   🃏 Dealer: {dealer_name}")
+                print(f"   🔹 Small Blind: {sb_name} (💰{self.poker_rules['small_blind']})")
+                print(f"   🔸 Big Blind: {bb_name} (💰{self.poker_rules['big_blind']})")
+                
+                # Show starting chip counts
+                print("\n💰 Starting Chips:")
+                for player in game_state.players:
+                    agent = self.white_agents.get(player.id)
+                    name = agent.name if agent else player.name
+                    print(f"   {name}: {player.chips} chips")
                 
                 # Play the hand
                 hand_result = await self._play_hand_a2a(agent_ids)
@@ -491,7 +735,9 @@ Please respond with your poker decisions in the specified JSON format."""
                     hands_won[winner] += 1
                     game_log.append(hand_result)
                     
-                    self.print_status(f"Hand {hand_num + 1} winner: {self.white_agents[winner].name}")
+                    winner_name = self.white_agents[winner].name
+                    print(f"\n✅ Hand {hand_num + 1} Complete - Winner: {winner_name}")
+                    print("="*70)
                 
                 # Check if any player is eliminated (simplified check)
                 if self.poker_engine.game_state:
@@ -526,14 +772,40 @@ Please respond with your poker decisions in the specified JSON format."""
                 return None
                 
             hand_log = []
+            last_round = None
             
             # Play through betting rounds
             while self.poker_engine.game_state.round != "showdown":
-                current_player = self.poker_engine.game_state.players[self.poker_engine.game_state.current_player]
+                game_state = self.poker_engine.game_state
+                
+                # Show new betting round header
+                if game_state.round != last_round:
+                    last_round = game_state.round
+                    print(f"\n📋 {game_state.round.upper()} - Pot: 💰{game_state.pot}")
+                    
+                    # Show community cards if any
+                    if game_state.community_cards:
+                        cards_str = " ".join([str(card) for card in game_state.community_cards])
+                        print(f"   Community Cards: {cards_str}")
+                    else:
+                        print(f"   Community Cards: (none yet)")
+                    
+                    # Show current bet
+                    if game_state.current_bet > 0:
+                        print(f"   Current Bet: 💰{game_state.current_bet}")
+                    print()
+                
+                current_player = game_state.players[game_state.current_player]
+                agent = self.white_agents.get(current_player.id)
+                agent_name = agent.name if agent else current_player.name
                 
                 if current_player.id in agent_ids:
+                    # Show player's turn with their cards
+                    player_cards_str = " ".join([str(card) for card in current_player.cards])
+                    print(f"🎯 {agent_name}'s Turn (Cards: {player_cards_str}, Chips: 💰{current_player.chips})")
+                    
                     # Get decision from agent via A2A and execute it
-                    decision_result = await self._get_agent_decision_a2a(current_player.id, self.poker_engine.game_state)
+                    decision_result = await self._get_agent_decision_a2a(current_player.id, game_state)
                     
                     if decision_result:
                         # Log the decision
@@ -545,7 +817,24 @@ Please respond with your poker decisions in the specified JSON format."""
                             "engine_result": decision_result["engine_result"]
                         })
                         
-                        self.print_status(f"Player {current_player.id}: {decision_result['action_executed']} (amount: {decision_result['amount']})")
+                        action = decision_result['action_executed']
+                        amount = decision_result['amount']
+                        reasoning = decision_result.get('decision', {}).get('reasoning', '')
+                        
+                        # Track action for metrics
+                        self._track_action(current_player.id, action, game_state.round, amount)
+                        
+                        # Show action with emoji
+                        action_emoji = {"fold": "❌", "call": "✅", "raise": "🚀", "check": "✓", "all_in": "🔥"}
+                        emoji = action_emoji.get(action, "🎲")
+                        
+                        print(f"   {emoji} {agent_name}: {action.upper()}", end="")
+                        if amount > 0:
+                            print(f" 💰{amount}", end="")
+                        if reasoning:
+                            print(f" - {reasoning}")
+                        else:
+                            print()
                     else:
                         # Default to fold if no decision
                         self.poker_engine.process_action(current_player.id, Action.FOLD, 0)
@@ -555,7 +844,7 @@ Please respond with your poker decisions in the specified JSON format."""
                             "action_executed": "fold",
                             "amount": 0
                         })
-                        self.print_status(f"Player {current_player.id}: fold (no response)")
+                        print(f"   ❌ {agent_name}: FOLD (no response)")
                 else:
                     # Skip non-agent players (shouldn't happen in this setup)
                     self.poker_engine.process_action(current_player.id, Action.FOLD, 0)
@@ -565,11 +854,65 @@ Please respond with your poker decisions in the specified JSON format."""
                         "action_executed": "fold",
                         "amount": 0
                     })
+                    print(f"   ❌ {agent_name}: FOLD (non-agent)")
+            
+            # Show showdown
+            print(f"\n🎴 SHOWDOWN")
+            print("-" * 70)
+            
+            # Show all players' cards
+            for player in self.poker_engine.game_state.players:
+                if player.is_active:
+                    agent = self.white_agents.get(player.id)
+                    agent_name = agent.name if agent else player.name
+                    cards_str = " ".join([str(card) for card in player.cards])
+                    print(f"   {agent_name}: {cards_str} (Chips: 💰{player.chips})")
             
             # Determine hand winner
             # The poker engine should have determined the winner through _determine_winner
             # For now, use the player with most chips as fallback
             winner = max(self.poker_engine.game_state.players, key=lambda p: p.chips).id
+            winner_agent = self.white_agents.get(winner)
+            winner_name = winner_agent.name if winner_agent else winner
+            
+            print(f"\n🏆 Winner: {winner_name}")
+            print(f"💰 Final Pot: {self.poker_engine.game_state.pot}")
+            
+            # Track results for all players
+            starting_chips = self.poker_rules.get("starting_chips", 1000)
+            for player in self.poker_engine.game_state.players:
+                if player.id in agent_ids:
+                    winnings = player.chips - starting_chips
+                    is_winner = (player.id == winner)
+                    at_showdown = self.poker_engine.game_state.round == "showdown" and len([p for p in self.poker_engine.game_state.players if p.is_active]) > 1
+                    in_blind = (player.position <= 2)  # Dealer, SB, BB
+                    put_money_in = player.total_bet > 0
+                    
+                    # Track hand participation
+                    self._track_hand_participation(player.id, put_money_in, in_blind)
+                    
+                    # Track hand result
+                    if is_winner:
+                        self._track_hand_result(player.id, True, player.position, winnings, at_showdown)
+                    
+                    # Track all players' positions even if they didn't win
+                    if put_money_in:
+                        if player.id not in self.agent_metrics:
+                            self.agent_metrics[player.id] = AgentMetrics()
+                        metrics = self.agent_metrics[player.id]
+                        position_name = self._get_position_name(player.position)
+                        if position_name not in metrics.hands_by_position:
+                            metrics.hands_by_position[position_name] = 0
+                        metrics.hands_by_position[position_name] += 1
+            
+            # Show final chip counts
+            print(f"\n💰 Final Chips:")
+            for player in self.poker_engine.game_state.players:
+                agent = self.white_agents.get(player.id)
+                agent_name = agent.name if agent else player.name
+                change = player.chips - starting_chips
+                change_str = f"(+{change})" if change > 0 else f"({change})" if change < 0 else ""
+                print(f"   {agent_name}: 💰{player.chips} {change_str}")
             
             return {
                 "winner": winner,
@@ -584,6 +927,80 @@ Please respond with your poker decisions in the specified JSON format."""
         except Exception as e:
             self.logger.error(f"Error playing hand: {e}")
             return None
+    
+    def _track_action(self, agent_id: str, action: str, round_name: str, amount: int = 0):
+        """Track an action for metrics calculation"""
+        if agent_id not in self.agent_metrics:
+            self.agent_metrics[agent_id] = AgentMetrics()
+        
+        metrics = self.agent_metrics[agent_id]
+        
+        # Track basic actions
+        if action == "fold":
+            metrics.folds += 1
+        elif action == "call":
+            metrics.calls += 1
+        elif action == "raise":
+            metrics.raises += 1
+            if round_name == "preflop":
+                metrics.preflop_raises += 1
+        elif action == "check":
+            metrics.checks += 1
+        elif action == "all_in":
+            metrics.raises += 1  # Count all-in as aggressive action
+        
+        # Track preflop actions
+        if round_name == "preflop" and action in ["fold", "call", "raise"]:
+            metrics.preflop_actions += 1
+    
+    def _track_hand_participation(self, agent_id: str, put_money_in: bool, in_blind: bool):
+        """Track hand participation for VPIP calculation"""
+        if agent_id not in self.agent_metrics:
+            self.agent_metrics[agent_id] = AgentMetrics()
+        
+        metrics = self.agent_metrics[agent_id]
+        
+        if put_money_in:
+            metrics.hands_participated += 1
+            if not in_blind:
+                metrics.hands_voluntarily_played += 1
+    
+    def _track_hand_result(self, agent_id: str, won: bool, position: int, winnings: int, at_showdown: bool):
+        """Track hand result for position and showdown metrics"""
+        if agent_id not in self.agent_metrics:
+            self.agent_metrics[agent_id] = AgentMetrics()
+        
+        metrics = self.agent_metrics[agent_id]
+        
+        # Track position
+        position_name = self._get_position_name(position)
+        if position_name not in metrics.hands_by_position:
+            metrics.hands_by_position[position_name] = 0
+        metrics.hands_by_position[position_name] += 1
+        
+        if won:
+            if position_name not in metrics.wins_by_position:
+                metrics.wins_by_position[position_name] = 0
+            metrics.wins_by_position[position_name] += 1
+            
+            # Track showdown vs non-showdown winnings
+            if at_showdown:
+                metrics.showdown_winnings += winnings
+            else:
+                metrics.non_showdown_winnings += winnings
+    
+    def _get_position_name(self, position: int) -> str:
+        """Get position name from position index"""
+        if position == 0:
+            return "Dealer"
+        elif position == 1:
+            return "Small Blind"
+        elif position == 2:
+            return "Big Blind"
+        elif position == 3:
+            return "Early Position"
+        else:
+            return f"Position {position}"
 
     async def _get_agent_decision_a2a(self, agent_id: str, game_state) -> Optional[Dict[str, Any]]:
         """Get poker decision from agent via A2A communication and execute it"""
@@ -740,10 +1157,10 @@ Good luck!"""
         return round(performance_score, 1)
 
     def _print_final_report(self):
-        """Print final evaluation report"""
-        print("\n" + "="*80)
+        """Print final evaluation report with detailed metrics"""
+        print("\n" + "="*100)
         print("POKER AGENT EVALUATION REPORT")
-        print("="*80)
+        print("="*100)
         
         if not self.evaluation_results:
             print("No agents evaluated.")
@@ -756,14 +1173,93 @@ Good luck!"""
             reverse=True
         )
         
-        print(f"{'Rank':<4} {'Agent Name':<20} {'Type':<10} {'Win Rate':<10} {'Net Chips':<12} {'Score':<8}")
-        print("-" * 80)
+        print(f"\n{'Rank':<4} {'Agent Name':<25} {'Win Rate':<10} {'Net Chips':<12} {'Score':<8}")
+        print("-" * 100)
         
         for i, result in enumerate(sorted_results, 1):
-            print(f"{i:<4} {result.agent_name:<20} {result.agent_type:<10} "
-                  f"{result.win_rate:.2%} {result.net_chips:>+8} {result.performance_score:.1f}")
+            print(f"{i:<4} {result.agent_name:<25} {result.win_rate:.2%} {result.net_chips:>+10} {result.performance_score:>6.1f}")
         
-        print("="*80)
+        print("\n" + "="*100)
+        print("DETAILED STRATEGIC METRICS")
+        print("="*100)
+        
+        for i, result in enumerate(sorted_results, 1):
+            print(f"\n{i}. {result.agent_name} ({result.agent_type})")
+            print("-" * 80)
+            metrics = result.metrics
+            
+            # 1. Aggression Factor
+            af = metrics.calculate_af()
+            af_str = f"{af:.2f}" if af != float('inf') else "∞"
+            print(f"   🎯 Aggression Factor (AF): {af_str}")
+            if af < 0.5:
+                print(f"      → Very passive player")
+            elif af < 1.0:
+                print(f"      → Passive player")
+            elif af < 2.0:
+                print(f"      → Balanced player")
+            elif af < 3.0:
+                print(f"      → Aggressive player")
+            else:
+                print(f"      → Very aggressive player")
+            
+            # 2. VPIP
+            vpip = metrics.calculate_vpip()
+            print(f"   📊 VPIP: {vpip:.1f}%")
+            if vpip < 15:
+                print(f"      → Tight player (selective)")
+            elif vpip < 25:
+                print(f"      → Moderate player")
+            elif vpip < 35:
+                print(f"      → Loose player (plays many hands)")
+            else:
+                print(f"      → Very loose player")
+            
+            # 3. Preflop Raise
+            pfr = metrics.calculate_pfr()
+            print(f"   🚀 Preflop Raise (PFR): {pfr:.1f}%")
+            if pfr > 0:
+                pfr_vpip_ratio = pfr / vpip if vpip > 0 else 0
+                print(f"      → PFR/VPIP Ratio: {pfr_vpip_ratio:.2f}")
+                if pfr_vpip_ratio > 0.8:
+                    print(f"      → Very aggressive preflop player")
+                elif pfr_vpip_ratio > 0.5:
+                    print(f"      → Aggressive preflop player")
+            
+            # 4. Positional Win Rates
+            positional_wr = metrics.get_positional_win_rate()
+            if positional_wr:
+                print(f"   📍 Positional Win Rates:")
+                for pos_name, wr in positional_wr.items():
+                    print(f"      {pos_name}: {wr:.1f}%")
+            
+            # 5. Showdown vs Non-Showdown
+            showdown_ratio = metrics.get_showdown_ratio()
+            if showdown_ratio > 0 or metrics.non_showdown_winnings > 0:
+                print(f"   💰 Winnings Source:")
+                print(f"      Showdown: {metrics.showdown_winnings:+d} chips")
+                print(f"      Non-Showdown: {metrics.non_showdown_winnings:+d} chips")
+                if showdown_ratio > 0.6:
+                    print(f"      → Wins mostly by having best hands")
+                elif showdown_ratio > 0.4:
+                    print(f"      → Balanced win strategy")
+                else:
+                    print(f"      → Wins mostly by forcing folds (bluff/aggression)")
+            
+            # 6. Fold to 3-Bet
+            fold_to_3bet = metrics.calculate_fold_to_3bet()
+            if metrics.faced_3bet > 0:
+                print(f"   ⚡ Fold to 3-Bet: {fold_to_3bet:.1f}% ({metrics.folded_to_3bet}/{metrics.faced_3bet})")
+                if fold_to_3bet > 70:
+                    print(f"      → Highly exploitable by aggressive 3-bets")
+                elif fold_to_3bet < 30:
+                    print(f"      → Resilient to 3-bets")
+            
+            # Summary stats
+            print(f"   📈 Action Summary:")
+            print(f"      Folds: {metrics.folds}, Calls: {metrics.calls}, Raises: {metrics.raises}, Checks: {metrics.checks}")
+        
+        print("\n" + "="*100)
 
 
 

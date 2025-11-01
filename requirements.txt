@@ -5,5 +5,16 @@ asyncio-mqtt==0.16.1
 python-multipart==0.0.6
 jinja2==3.1.2
 aiofiles==23.2.1
-# Google A2A SDK
-a2a-sdk==0.3.9
+# Google A2A SDK (with http-server extras)
+a2a-sdk[http-server]==0.3.9
+# Or install separately (note: anyio version must be <4.0.0 for FastAPI compatibility):
+starlette>=0.27.0
+sse-starlette>=1.8.0,<3.0.0
+anyio>=3.7.1,<4.0.0
+# Additional dependencies
+python-dotenv>=1.0.0
+toml>=0.10.2
+pydantic>=2.0.0
+httpx>=0.25.0
+litellm>=1.0.0
+openai>=1.0.0
