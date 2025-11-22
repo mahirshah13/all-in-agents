@@ -1,6 +1,3 @@
-# Green Agent (Assessment Manager) Configuration
-# This agent coordinates poker evaluations and manages white agents
-
 [agent]
 name = "Poker Assessment Manager"
 description = "Green agent that coordinates poker evaluations and manages multiple white agents"
@@ -20,18 +17,79 @@ endpoint = "http://localhost:8000"
 discovery_endpoint = "/.well-known/agent.json"
 
 [evaluation]
-# List of white agents to evaluate
-white_agents = [
-    { id = "openai_agent_1", name = "OpenAI Poker Agent 1", type = "openai", url = "http://localhost:8001" },
-    { id = "openai_agent_2", name = "OpenAI Poker Agent 2", type = "openai", url = "http://localhost:8002" },
-    { id = "openai_agent_3", name = "OpenAI Poker Agent 3", type = "openai", url = "http://localhost:8003" },
-    { id = "openai_agent_4", name = "OpenAI Poker Agent 4", type = "openai", url = "http://localhost:8004" }
-]
-
-# Evaluation settings
-games_per_agent = 3
-tournament_games = 3
+games_per_agent = 10
+tournament_games = 10
 evaluation_timeout = 30
+run_benchmark_tests = true
+[[evaluation.all_white_agents]]
+id = "tagbot"
+name = "TAGBot"
+type = "tagbot"
+url = "http://localhost:8001"
+description = "Tight-Aggressive"
+
+[[evaluation.all_white_agents]]
+id = "montecarlo"
+name = "Monte Carlo"
+type = "montecarlo"
+url = "http://localhost:8002"
+description = "Simulation-Based"
+
+[[evaluation.all_white_agents]]
+id = "maniac"
+name = "Maniac"
+type = "maniac"
+url = "http://localhost:8003"
+description = "Ultra-Aggressive"
+
+[[evaluation.all_white_agents]]
+id = "smart_agent"
+name = "Smart Agent"
+type = "smart"
+url = "http://localhost:8004"
+description = "Pot Odds & Position"
+
+[[evaluation.all_white_agents]]
+id = "equity"
+name = "Equity Calculator"
+type = "equity"
+url = "http://localhost:8005"
+description = "Equity-Based"
+
+[[evaluation.all_white_agents]]
+id = "adaptive"
+name = "Adaptive Heuristic"
+type = "adaptive"
+url = "http://localhost:8006"
+description = "Stack-Aware Adaptive"
+
+[[evaluation.white_agents]]
+id = "tagbot"
+name = "TAGBot"
+type = "tagbot"
+description = "Tight-Aggressive"
+url = "http://localhost:8001"
+
+[[evaluation.white_agents]]
+id = "montecarlo"
+name = "Monte Carlo"
+type = "montecarlo"
+description = "Simulation-Based"
+url = "http://localhost:8002"
+
+[[evaluation.white_agents]]
+id = "maniac"
+name = "Maniac"
+type = "maniac"
+description = "Ultra-Aggressive"
+url = "http://localhost:8003"
+
+[[evaluation.white_agents]]
+id = "adaptive"
+name = "Adaptive Heuristic"
+type = "adaptive"
+description = "Stack-Aware Adaptive"
+url = "http://localhost:8006"
 
 [poker_rules]
 small_blind = 10

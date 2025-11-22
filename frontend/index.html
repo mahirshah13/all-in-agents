@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Poker Agent Visualization</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Sidebar - Bot Selection -->
+        <aside class="sidebar">
+            <h2>🤖 Playing Agents</h2>
+            <div id="bot-list" class="bot-list">
+                <!-- Selected agents will be displayed here -->
+            </div>
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="/select" style="color: #4CAF50; text-decoration: none; font-size: 14px; display: block; padding: 10px; background: rgba(76, 175, 80, 0.1); border-radius: 8px; margin-bottom: 10px;">Change Agents →</a>
+            </div>
+            
+            <div class="game-stats">
+                <h3>Game Info</h3>
+                <div class="stat-row">
+                    <span>Hand:</span>
+                    <span id="hand-number">-</span>
+                </div>
+                <div class="stat-row">
+                    <span>Round:</span>
+                    <span id="round">-</span>
+                </div>
+                <div class="stat-row">
+                    <span>Pot:</span>
+                    <span id="pot">💰0</span>
+                </div>
+                <div class="stat-row">
+                    <span>Current Bet:</span>
+                    <span id="current-bet">💰0</span>
+                </div>
+            </div>
+            
+            <div class="connection-status">
+                <span id="connection-status" class="status-indicator disconnected">Disconnected</span>
+            </div>
+        </aside>
+
+        <!-- Main Poker Table -->
+        <main class="poker-table-container">
+            <div class="poker-table">
+                <!-- Community Cards Area (Center) -->
+                <div class="community-area">
+                    <div class="pot-display">
+                        <div class="pot-label">Pot</div>
+                        <div class="pot-amount" id="pot-display">💰0</div>
+                    </div>
+                    <div id="community-cards" class="community-cards">
+                        <div class="card-slot"></div>
+                        <div class="card-slot"></div>
+                        <div class="card-slot"></div>
+                        <div class="card-slot"></div>
+                        <div class="card-slot"></div>
+                    </div>
+                    <div class="round-indicator" id="round-display">Preflop</div>
+                </div>
+
+                <!-- Player Positions (Around Table) -->
+                <div class="player-positions">
+                    <!-- Player positions will be dynamically added here -->
+                    <div id="players-container" class="players-container"></div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Sidebar - Action Log -->
+        <aside class="action-log-sidebar">
+            <h2>📋 Action Log</h2>
+            <div id="action-log" class="log-container">
+                <div class="log-entry info">Waiting for game to start...</div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>

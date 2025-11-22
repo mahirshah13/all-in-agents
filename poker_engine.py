@@ -353,7 +353,15 @@ class PokerEngine:
             return
         
         current_idx = active_players.index(self.game_state.current_player)
-        self.game_state.current_player = active_players[(current_idx + 1) % len(active_players)]
+        next_idx = (current_idx + 1) % len(active_players)
+        
+        # If we've wrapped around and all bets are matched, don't move (round will complete)
+        if next_idx == 0:
+            # Check if round should complete instead
+            if self._is_round_complete():
+                return
+        
+        self.game_state.current_player = active_players[next_idx]
     
     def _is_round_complete(self) -> bool:
         """Check if current betting round is complete"""
@@ -361,12 +369,29 @@ class PokerEngine:
         if len(active_players) <= 1:
             return True
         
-        # Check if all active players have either folded, gone all-in, or matched the current bet
+        # If there's no bet, check if all players have acted (checked)
+        if self.game_state.current_bet == 0:
+            # All players must have acted (checked or folded)
+            for player in active_players:
+                if player.current_bet == 0 and player.chips > 0:
+                    # Check if this player has had a chance to act
+                    # For simplicity, if all bets are 0, round is complete
+                    return True
+            return True
+        
+        # If there's a bet, all active players must have matched it or folded
         for player in active_players:
             if player.current_bet < self.game_state.current_bet and player.chips > 0:
                 return False
         
-        return True
+        # Additional check: if we've gone around and all bets are matched, round is complete
+        # This handles the case where the last raiser has already acted
+        all_matched = all(
+            p.current_bet == self.game_state.current_bet or p.chips == 0 or not p.is_active
+            for p in active_players
+        )
+        
+        return all_matched
     
     def _advance_round(self):
         """Advance to next betting round"""
@@ -377,21 +402,32 @@ class PokerEngine:
             self._determine_winner()
             return
         
-        # Reset current bets
+        # Reset current bets for next round
         for player in self.game_state.players:
             player.current_bet = 0
         
         self.game_state.current_bet = 0
         
+        # Advance to next round and deal community cards
         if self.game_state.round == "preflop":
             self.game_state.round = "flop"
             self._deal_community_cards(3)
+            # Set current player to first active player after dealer
+            active_indices = [i for i, p in enumerate(self.game_state.players) if p.is_active and p.chips > 0]
+            if active_indices:
+                self.game_state.current_player = active_indices[0]
         elif self.game_state.round == "flop":
             self.game_state.round = "turn"
             self._deal_community_cards(1)
+            active_indices = [i for i, p in enumerate(self.game_state.players) if p.is_active and p.chips > 0]
+            if active_indices:
+                self.game_state.current_player = active_indices[0]
         elif self.game_state.round == "turn":
             self.game_state.round = "river"
             self._deal_community_cards(1)
+            active_indices = [i for i, p in enumerate(self.game_state.players) if p.is_active and p.chips > 0]
+            if active_indices:
+                self.game_state.current_player = active_indices[0]
         elif self.game_state.round == "river":
             self.game_state.round = "showdown"
             self._determine_winner()

@@ -1,6 +1,7 @@
 """White agent implementation - the target agent being tested."""
 
 import json
+import os
 import uvicorn
 import dotenv
 from a2a.server.apps import A2AStarletteApplication
@@ -11,6 +12,8 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentSkill, AgentCard, AgentCapabilities
 from a2a.utils import new_agent_text_message
 from litellm import completion
+
+from .strategies import get_strategy, PokerStrategy
 
 
 dotenv.load_dotenv()
@@ -47,7 +50,9 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
       this automatically starts a fresh conversation thread
     - Old context_ids remain in memory but won't be accessed after reset
     """
-    def __init__(self):
+    def __init__(self, agent_type: str = "openai"):
+        self.agent_type = agent_type
+        self.strategy: PokerStrategy = get_strategy(agent_type)
         self.ctx_id_to_messages = {}  # Maps context_id -> list of messages (conversation history)
         self.ctx_id_to_game_state = {}  # Maps context_id -> current game state
 
@@ -82,7 +87,25 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
         # Store current game state
         self.ctx_id_to_game_state[context_id] = game_data
         
-        # Build context-aware prompt
+        # If we have a strategy (non-OpenAI agent), use it
+        if self.strategy:
+            # Extract player chips from game state if available
+            game_state = game_data.get("game_state", {})
+            players = game_data.get("players", [])
+            player_id = None  # We'll need to identify the player somehow
+            
+            # Try to find player chips from the game state structure
+            player_chips = 1000  # Default
+            if "your_chips" in game_data:
+                player_chips = game_data["your_chips"]
+            
+            # Add player_chips to game_data for strategy
+            game_data["player_chips"] = player_chips
+            
+            decision = self.strategy.make_decision(game_data)
+            return json.dumps(decision)
+        
+        # Otherwise use OpenAI LLM
         messages = self.ctx_id_to_messages[context_id]
         
         # Add system message if this is the first poker message
@@ -171,13 +194,17 @@ CRITICAL: Respond with ONLY the JSON object. Do NOT wrap it in markdown code blo
         raise NotImplementedError
 
 
-def start_white_agent(agent_name="general_white_agent", host="localhost", port=9002):
-    print("Starting white agent...")
+def start_white_agent(agent_name="general_white_agent", host="localhost", port=9002, agent_type="openai"):
+    """Start a white agent with specified type"""
+    print(f"Starting white agent: {agent_name} (type: {agent_type}) on {host}:{port}")
     url = f"http://{host}:{port}"
     card = prepare_white_agent_card(url)
 
+    # Get agent type from environment or parameter
+    agent_type = os.getenv("AGENT_TYPE", agent_type)
+    
     request_handler = DefaultRequestHandler(
-        agent_executor=GeneralWhiteAgentExecutor(),
+        agent_executor=GeneralWhiteAgentExecutor(agent_type=agent_type),
         task_store=InMemoryTaskStore(),
     )
 

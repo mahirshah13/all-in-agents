@@ -54,9 +54,9 @@ async def start_green_agent_only():
         raise
 
 
-def start_white_agent_only(agent_id: str, port: int):
+def start_white_agent_only(agent_id: str, port: int, agent_type: str = "openai"):
     """Start only a specific white agent"""
-    print(f"⚪ Starting White Agent: {agent_id} on port {port}")
+    print(f"⚪ Starting White Agent: {agent_id} (type: {agent_type}) on port {port}")
     print("=" * 50)
     
     try:
@@ -66,7 +66,7 @@ def start_white_agent_only(agent_id: str, port: int):
         print("🛑 Press Ctrl+C to stop the server")
         print("=" * 50)
         
-        start_white_agent(agent_name=agent_id, host="localhost", port=port)
+        start_white_agent(agent_name=agent_id, host="localhost", port=port, agent_type=agent_type)
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:
@@ -91,22 +91,48 @@ async def start_full_system():
         print(f"❌ Error loading config from {config_path}: {e}")
         return
     
-    # Start white agents in background
+    # Start frontend server in background (optional)
+    frontend_process = None
+    try:
+        print("🌐 Starting frontend server...")
+        frontend_process = subprocess.Popen([
+            sys.executable, "frontend_server.py"
+        ])
+        print("✅ Frontend server started on http://localhost:8080")
+        time.sleep(1)  # Give frontend server time to start
+    except Exception as e:
+        print(f"⚠️  Could not start frontend server: {e}")
+        print("   You can start it manually: python frontend_server.py")
+    
+    # Start ALL available white agents (6 total) so they're ready for selection
     white_agent_processes = []
     try:
-        print("🚀 Starting white agents...")
-        for agent_data in config["evaluation"]["white_agents"]:
+        print("🚀 Starting all available white agents...")
+        
+        # All 6 available agents
+        all_agents = [
+            {"id": "tagbot", "name": "TAGBot", "type": "tagbot", "port": 8001},
+            {"id": "montecarlo", "name": "Monte Carlo", "type": "montecarlo", "port": 8002},
+            {"id": "maniac", "name": "Maniac", "type": "maniac", "port": 8003},
+            {"id": "smart_agent", "name": "Smart Agent", "type": "smart", "port": 8004},
+            {"id": "equity", "name": "Equity Calculator", "type": "equity", "port": 8005},
+            {"id": "adaptive", "name": "Adaptive Heuristic", "type": "adaptive", "port": 8006}
+        ]
+        
+        for agent_data in all_agents:
             agent_id = agent_data["id"]
-            port = int(agent_data["url"].split(":")[-1])
+            agent_type = agent_data["type"]
+            port = agent_data["port"]
             
-            print(f"⚪ Starting {agent_data['name']} on port {port}")
+            print(f"⚪ Starting {agent_data['name']} (type: {agent_type}) on port {port}")
             
             # Start white agent in background process
             process = subprocess.Popen([
                 sys.executable, "launcher.py", 
                 "--white-only", 
                 "--agent-id", agent_id, 
-                "--port", str(port)
+                "--port", str(port),
+                "--agent-type", agent_type
             ])
             white_agent_processes.append(process)
             
@@ -133,6 +159,15 @@ async def start_full_system():
                 process.wait(timeout=5)
             except:
                 process.kill()
+        
+        # Clean up frontend server
+        if frontend_process:
+            try:
+                print("🧹 Cleaning up frontend server...")
+                frontend_process.terminate()
+                frontend_process.wait(timeout=5)
+            except:
+                frontend_process.kill()
 
 
 def main():
@@ -169,6 +204,12 @@ Examples:
         default=8001, 
         help="Port for white agent (default: 8001)"
     )
+    parser.add_argument(
+        "--agent-type", 
+        type=str, 
+        default="openai", 
+        help="Agent type: random, conservative, aggressive, smart, openai (default: openai)"
+    )
     
     args = parser.parse_args()
     
@@ -184,9 +225,9 @@ Examples:
         elif args.white_only:
             if not args.agent_id:
                 print("❌ Agent ID required for white agent launch")
-                print("Usage: python launcher.py --white-only --agent-id <agent_id> [--port <port>]")
+                print("Usage: python launcher.py --white-only --agent-id <agent_id> [--port <port>] [--agent-type <type>]")
                 sys.exit(1)
-            start_white_agent_only(args.agent_id, args.port)
+            start_white_agent_only(args.agent_id, args.port, args.agent_type)
         else:
             # Default: start full system
             asyncio.run(start_full_system())

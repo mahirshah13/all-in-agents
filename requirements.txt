@@ -1,10 +1,11 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-websockets==12.0
-asyncio-mqtt==0.16.1
-python-multipart==0.0.6
-jinja2==3.1.2
-aiofiles==23.2.1
+# Core dependencies
+fastapi>=0.115.2
+uvicorn>=0.24.0
+websockets>=12.0
+asyncio-mqtt>=0.16.1
+python-multipart>=0.0.6
+jinja2>=3.1.2
+aiofiles>=23.2.1
 # Google A2A SDK (with http-server extras)
 a2a-sdk[http-server]==0.3.9
 # Or install separately (note: anyio version must be <4.0.0 for FastAPI compatibility):
@@ -16,5 +17,6 @@ python-dotenv>=1.0.0
 toml>=0.10.2
 pydantic>=2.0.0
 httpx>=0.25.0
+requests>=2.31.0
 litellm>=1.0.0
 openai>=1.0.0

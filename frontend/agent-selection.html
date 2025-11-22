@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Agents</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .selection-container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .agent-option {
+            background: #f5f5f5;
+            border: 3px solid #ddd;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .agent-option:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+        .agent-option.selected {
+            border-color: #4CAF50;
+            background: #e8f5e9;
+        }
+        .agent-option.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .agent-name {
+            font-weight: bold;
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .agent-description {
+            font-size: 14px;
+            color: #666;
+        }
+        .selected-count {
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 18px;
+            color: #667eea;
+            font-weight: bold;
+        }
+        .start-button {
+            width: 100%;
+            padding: 15px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .start-button:hover:not(:disabled) {
+            background: #45a049;
+        }
+        .start-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="selection-container">
+        <h1>🃏 Select 4 Agents</h1>
+        <p class="subtitle">Choose which agents will play in this tournament</p>
+        <div class="selected-count">
+            <span id="selected-count">0</span> / 4 selected
+        </div>
+        <div class="agents-grid" id="agents-grid">
+            <!-- Agents will be loaded here -->
+        </div>
+        <button class="start-button" id="start-button" disabled>Start Tournament</button>
+    </div>
+    <script>
+        const agents = [
+            { id: "tagbot", name: "TAGBot", description: "Tight-Aggressive" },
+            { id: "montecarlo", name: "Monte Carlo", description: "Simulation-Based" },
+            { id: "maniac", name: "Maniac", description: "Ultra-Aggressive" },
+            { id: "smart_agent", name: "Smart Agent", description: "Pot Odds & Position" },
+            { id: "equity", name: "Equity Calculator", description: "Equity-Based" },
+            { id: "adaptive", name: "Adaptive Heuristic", description: "Stack-Aware Adaptive" }
+        ];
+        
+        let selectedAgents = [];
+        const maxSelection = 4;
+        
+        function renderAgents() {
+            const grid = document.getElementById('agents-grid');
+            grid.innerHTML = '';
+            
+            agents.forEach(agent => {
+                const option = document.createElement('div');
+                option.className = 'agent-option';
+                option.dataset.agentId = agent.id;
+                
+                if (selectedAgents.includes(agent.id)) {
+                    option.classList.add('selected');
+                }
+                
+                option.innerHTML = `
+                    <div class="agent-name">${agent.name}</div>
+                    <div class="agent-description">${agent.description}</div>
+                `;
+                
+                option.addEventListener('click', () => toggleAgent(agent.id));
+                grid.appendChild(option);
+            });
+            
+            updateSelectedCount();
+        }
+        
+        function toggleAgent(agentId) {
+            const index = selectedAgents.indexOf(agentId);
+            if (index > -1) {
+                selectedAgents.splice(index, 1);
+            } else {
+                if (selectedAgents.length < maxSelection) {
+                    selectedAgents.push(agentId);
+                }
+            }
+            renderAgents();
+            updateStartButton();
+        }
+        
+        function updateSelectedCount() {
+            const countEl = document.getElementById('selected-count');
+            countEl.textContent = selectedAgents.length;
+        }
+        
+        function updateStartButton() {
+            const button = document.getElementById('start-button');
+            button.disabled = selectedAgents.length !== maxSelection;
+        }
+        
+        document.getElementById('start-button').addEventListener('click', () => {
+            if (selectedAgents.length === maxSelection) {
+                // Send selection to backend
+                fetch('/api/select-agents', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agents: selectedAgents })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Show success message
+                        alert('Agents selected! Starting tournament...');
+                        // Redirect to main game view
+                        window.location.href = '/';
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error starting tournament. Make sure the backend is running.');
+                });
+            }
+        });
+        
+        renderAgents();
+    </script>
+</body>
+</html>
+
