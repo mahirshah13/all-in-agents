@@ -36,47 +36,231 @@ poker-agentify/
    # Edit .env with your actual values
    ```
 
+## Commands Summary
+
+### Running White Agents
+```bash
+# Run individual white agent (replace AGENT_ID, PORT, and TYPE)
+python launcher.py --white-only --agent-id <AGENT_ID> --port <PORT> --agent-type <TYPE>
+
+# Examples:
+python launcher.py --white-only --agent-id tagbot --port 8001 --agent-type tagbot
+python launcher.py --white-only --agent-id smart_agent --port 8004 --agent-type smart
+```
+
+### Running Green Agent to Evaluate
+```bash
+# Complete system (starts all agents + green agent + evaluation)
+python launcher.py
+
+# Green agent only (requires white agents to be running separately)
+python launcher.py --green-only
+```
+
+### Testing Green Agent Evaluation Results
+```bash
+# Benchmark tests run automatically with complete system
+python launcher.py
+
+# Test cases are defined in src/green_agent/evaluation_examples.py
+# Results displayed in terminal output after benchmark tests complete
+```
+
+### Reproducing Benchmark Results
+```bash
+# Run with same configuration to reproduce results
+python launcher.py
+# Results are deterministic (assuming deterministic white agents)
+```
+
 ## Usage
 
-### Launch Complete Evaluation System
+### Running White Agents to Complete the Task
+
+White agents are poker-playing agents that participate in evaluations. To run individual white agents for A2A communication, start them in separate terminals:
 
 ```bash
-# Launch the complete evaluation system (green agent + white agents + evaluation)
+# Terminal 1: Start TAGBot (Tight-Aggressive)
+python launcher.py --white-only --agent-id tagbot --port 8001 --agent-type tagbot
+
+# Terminal 2: Start Monte Carlo Agent
+python launcher.py --white-only --agent-id montecarlo --port 8002 --agent-type montecarlo
+
+# Terminal 3: Start Maniac Agent (Ultra-Aggressive)
+python launcher.py --white-only --agent-id maniac --port 8003 --agent-type maniac
+
+# Terminal 4: Start Smart Agent
+python launcher.py --white-only --agent-id smart_agent --port 8004 --agent-type smart
+
+# Terminal 5: Start Equity Calculator Agent
+python launcher.py --white-only --agent-id equity --port 8005 --agent-type equity
+
+# Terminal 6: Start Adaptive Heuristic Agent
+python launcher.py --white-only --agent-id adaptive --port 8006 --agent-type adaptive
+```
+
+**Available agent types:**
+- `tagbot` - Tight-Aggressive Bot
+- `montecarlo` - Monte Carlo simulation-based
+- `maniac` - Ultra-aggressive strategy
+- `smart` - Pot odds and position aware
+- `equity` - Equity calculator based
+- `adaptive` - Adaptive heuristic strategy
+
+Each white agent will start an A2A server on the specified port and wait for evaluation requests from the green agent.
+
+### Running Green Agent to Evaluate White Agents
+
+The green agent (assessment manager) coordinates evaluations and evaluates white agents. To run the green agent:
+
+#### Option 1: Complete System (Recommended)
+This automatically starts all white agents and the green agent:
+
+```bash
+# Launch the complete evaluation system (green agent + all white agents + evaluation)
 python main.py
 # or directly
 python launcher.py
 ```
 
-### Launch Individual Components
+This will:
+1. Start all 6 white agents automatically
+2. Start the green agent A2A server
+3. Run benchmark tests with ground-truth test cases
+4. Run individual evaluations for each agent
+5. Run tournaments between agents
+6. Display comprehensive results and metrics
+
+#### Option 2: Green Agent Only
+If white agents are already running, start only the green agent:
 
 ```bash
 # Start only the green agent A2A server
 python launcher.py --green-only
-
-# Start only a white agent A2A server
-python launcher.py --white-only --agent-id random_1 --port 8001
 ```
 
-### Running White Agents
+The green agent will:
+- Start an A2A server on `http://localhost:8000`
+- Connect to white agents configured in `src/green_agent/agent_card.toml`
+- Run evaluations and tournaments
+- Generate detailed evaluation reports
 
-To run white agents for A2A communication, start them in separate terminals:
+### Testing Green Agent's Evaluation Results on Test Cases
+
+The green agent includes 8 ground-truth test cases to verify evaluation reliability. These test cases are automatically run when the green agent starts (if `run_benchmark_tests = true` in the config).
+
+#### Running Benchmark Tests
+
+Benchmark tests run automatically when you start the complete system:
 
 ```bash
-# Terminal 1: Start Random Agent 1
-python launcher.py --white-only --agent-id random_1 --port 8001
-
-# Terminal 2: Start Random Agent 2  
-python launcher.py --white-only --agent-id random_2 --port 8002
-
-# Terminal 3: Start A2A Poker Agent
-python launcher.py --white-only --agent-id a2a_agent --port 8003
-
-# Terminal 4: Start OpenAI Poker Agent (with fallback if no API key)
-python launcher.py --white-only --agent-id openai_agent --port 8004
-
-# Terminal 5: Start Custom Strategy Agent
-python launcher.py --white-only --agent-id custom_agent --port 8005
+python launcher.py
 ```
+
+The benchmark tests evaluate each white agent on 8 test cases:
+1. **preflop_strong_hand** - Pocket aces should raise preflop
+2. **preflop_weak_hand** - 7-2 offsuit should fold preflop
+3. **flop_strong_hand** - Top pair should bet/raise on flop
+4. **flop_draw_pot_odds** - Flush draw with good pot odds should call
+5. **river_weak_hand** - Weak hand on river should fold to large bet
+6. **short_stack_all_in** - Short stack with strong hand should push all-in
+7. **position_awareness** - Strong hand in good position should raise
+8. **pot_odds_calculation** - Draw with favorable pot odds should call
+
+#### Viewing Test Case Results
+
+Test case results are displayed in the terminal output after benchmark tests complete. You'll see:
+
+```
+📊 Test Cases with Ground Truth:
+   ✅ preflop_strong_hand: raise (expected: raise, score: 0.91)
+   ✅ preflop_weak_hand: fold (expected: fold, score: 0.97)
+   ...
+```
+
+#### Test Case Configuration
+
+To enable/disable benchmark tests, edit `src/green_agent/agent_card.toml`:
+
+```toml
+[evaluation]
+run_benchmark_tests = true  # Set to false to skip benchmark tests
+```
+
+#### Test Case Details
+
+Test cases are defined in `src/green_agent/evaluation_examples.py` with:
+- Game state (cards, position, pot size, etc.)
+- Expected action (ground truth)
+- Minimum score threshold
+- Assessment dimensions (correctness, strategic quality, etc.)
+
+For detailed information about the evaluation system and test cases, see `EVALUATION_SYSTEM.md`.
+
+### Reproducing Benchmark Results
+
+The benchmark results are deterministic and can be reproduced by running the same evaluation configuration. To reproduce results:
+
+1. **Ensure consistent configuration:**
+   ```bash
+   # Check that src/green_agent/agent_card.toml has:
+   [evaluation]
+   hands_per_tournament = 10
+   tournament_games = 3
+   run_benchmark_tests = true
+   ```
+
+2. **Run the complete evaluation:**
+   ```bash
+   python launcher.py
+   ```
+
+3. **Results will include:**
+   - Benchmark test results (8 test cases per agent)
+   - Individual agent evaluations
+   - Tournament rankings
+   - Detailed metrics (AF, VPIP, PFR, positional win rates, etc.)
+
+The system uses a deterministic poker engine, so running the same configuration multiple times will produce consistent results (assuming white agents behave deterministically).
+
+### AgentBeats Compatibility
+
+This benchmark/green agent is designed to be runnable on AgentBeats. The system follows A2A (Agent-to-Agent) protocol standards and is compatible with AgentBeats infrastructure.
+
+#### AgentBeats Requirements
+
+- **A2A Protocol**: All agents communicate via A2A protocol
+- **Agent Cards**: Both green and white agents have `agent_card.toml` files
+- **Standard Endpoints**: Agents expose standard A2A endpoints
+- **Discovery**: Agents support `/.well-known/agent.json` discovery endpoint
+
+#### Running on AgentBeats
+
+1. **Green Agent Configuration:**
+   - Agent card: `src/green_agent/agent_card.toml`
+   - Endpoint: `http://localhost:8000` (configurable)
+   - Discovery: `http://localhost:8000/.well-known/agent.json`
+
+2. **White Agent Configuration:**
+   - Agent cards: `src/white_agent/agent_card.toml`
+   - Endpoints: Configurable ports (8001-8006)
+   - Discovery: Each agent exposes `/.well-known/agent.json`
+
+3. **Deployment:**
+   - Green agent can be deployed as a standalone A2A server
+   - White agents can be deployed individually or as a group
+   - All agents are A2A-compliant and can be registered with AgentBeats
+
+#### AgentBeats Integration
+
+The system is compatible with AgentBeats because:
+- ✅ Uses standard A2A protocol for agent communication
+- ✅ Implements `AgentExecutor` interface from `a2a.server.agent_execution`
+- ✅ Exposes A2A endpoints via `A2AStarletteApplication`
+- ✅ Supports agent discovery via `/.well-known/agent.json`
+- ✅ Uses standard A2A message format for agent-to-agent communication
+- ✅ Green agent can be invoked via A2A `execute` method
+- ✅ White agents respond to A2A requests with proper JSON format
 
 ### OpenAI White Agent
 
@@ -190,29 +374,59 @@ The white agent (poker player) configuration includes:
 }
 ```
 
-## Example Usage
+## Quick Start Examples
 
-### Basic Evaluation
+### Example 1: Complete Evaluation (All-in-One)
+
+Run the complete system with all agents:
 
 ```bash
-# Start the complete system
-python main.py launch
+python launcher.py
 ```
 
-This will:
-1. Launch the green agent (assessment manager)
-2. Launch all configured white agents
-3. Run individual evaluations for each agent
-4. Run a tournament between all agents
-5. Display final results and rankings
+This automatically:
+1. Starts all 6 white agents (TAGBot, Monte Carlo, Maniac, Smart, Equity, Adaptive)
+2. Starts the green agent (assessment manager)
+3. Runs benchmark tests with 8 ground-truth test cases
+4. Runs individual evaluations for each agent
+5. Runs tournaments between all agents
+6. Displays comprehensive results, metrics, and rankings
 
-### Custom Evaluation
+### Example 2: Manual Agent Setup
+
+Start agents manually for more control:
+
+```bash
+# Terminal 1: Start white agent
+python launcher.py --white-only --agent-id tagbot --port 8001 --agent-type tagbot
+
+# Terminal 2: Start another white agent
+python launcher.py --white-only --agent-id smart_agent --port 8004 --agent-type smart
+
+# Terminal 3: Start green agent (will evaluate the running white agents)
+python launcher.py --green-only
+```
+
+### Example 3: Testing Specific Agent
+
+To test a specific agent type:
+
+```bash
+# Start only one white agent
+python launcher.py --white-only --agent-id test_agent --port 8001 --agent-type smart
+
+# In another terminal, start green agent
+python launcher.py --green-only
+```
+
+### Customizing Evaluation
 
 You can modify the `src/green_agent/agent_card.toml` file to:
 - Add/remove white agents
-- Change evaluation parameters
-- Modify poker rules
+- Change evaluation parameters (hands per tournament, number of tournaments)
+- Modify poker rules (blinds, starting chips, max players)
 - Adjust metrics tracking
+- Enable/disable benchmark tests
 
 ## Metrics & Evaluation
 
