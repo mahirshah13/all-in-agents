@@ -214,6 +214,103 @@ You can modify the `src/green_agent/agent_card.toml` file to:
 - Modify poker rules
 - Adjust metrics tracking
 
+## Metrics & Evaluation
+
+The system tracks comprehensive poker metrics for each agent to evaluate playing style and performance:
+
+### Basic Performance Metrics
+
+- **Win Rate**: Percentage of hands won
+- **Net Chips**: Total chip gain/loss from starting stack
+- **Performance Score**: Composite score based on win rate and chip performance
+- **Total Hands**: Number of hands played
+- **Hands Won**: Number of hands won
+
+### Playing Style Metrics
+
+#### Aggression Factor (AF)
+- **Formula**: `(raises + bets) / calls`
+- **Interpretation**: 
+  - AF > 3: Very aggressive
+  - AF 2-3: Aggressive
+  - AF 1-2: Balanced
+  - AF < 1: Passive
+- **Purpose**: Measures how often an agent bets/raises vs calls
+
+#### VPIP (Voluntarily Put money In Pot)
+- **Formula**: `(hands voluntarily played / hands participated) × 100`
+- **Interpretation**:
+  - VPIP > 30%: Loose (plays many hands)
+  - VPIP 20-30%: Moderate
+  - VPIP < 20%: Tight (plays few hands)
+- **Purpose**: Measures how often an agent voluntarily enters pots (excluding blind positions)
+
+#### PFR (Preflop Raise)
+- **Formula**: `(preflop raises / preflop actions) × 100`
+- **Interpretation**: Percentage of preflop actions that are raises
+- **Purpose**: Measures preflop aggression and hand selection
+
+#### Fold to 3-Bet
+- **Formula**: `(folded to 3bet / faced 3bet) × 100`
+- **Interpretation**: How often an agent folds when facing a 3-bet
+- **Purpose**: Measures response to aggression and hand strength assessment
+
+### Action Tracking
+
+The system tracks all actions for each agent:
+- **Folds**: Number of times agent folded
+- **Calls**: Number of times agent called
+- **Raises**: Number of times agent raised
+- **Bets**: Number of times agent bet (post-flop)
+- **Checks**: Number of times agent checked
+
+### Positional Metrics
+
+- **Hands by Position**: Number of hands played from each position (Button, Small Blind, Big Blind, Early, Middle, Late)
+- **Wins by Position**: Number of wins from each position
+- **Positional Win Rate**: Win rate calculated for each position
+- **Purpose**: Evaluates how well agents play from different positions
+
+### Showdown Metrics
+
+- **Showdown Winnings**: Chips won at showdown (when cards are revealed)
+- **Non-Showdown Winnings**: Chips won without showdown (opponents folded)
+- **Showdown Ratio**: Ratio of showdown winnings to total winnings
+- **Purpose**: Distinguishes between winning by having the best hand vs. winning by making opponents fold
+
+### Advanced Tracking
+
+- **Hand Participation**: Tracks which hands an agent voluntarily entered
+- **Preflop Actions**: Tracks all preflop decision-making
+- **3-Bet Situations**: Tracks how agents respond to 3-bets (re-raises)
+- **Response Time**: Average time for agent to make decisions
+
+### Metric Calculation
+
+All metrics are calculated automatically during tournament play and displayed in:
+- Terminal output during evaluation
+- Final tournament summary
+- Evaluation results for each agent
+- Frontend visualization (if enabled)
+
+### Example Metrics Output
+
+```
+## Detailed Metrics:
+- Aggression Factor: 2.5 (Aggressive)
+- VPIP: 25.3% (Moderate)
+- PFR: 18.7% (Moderate)
+- Fold to 3-Bet: 65.0%
+- Positional Win Rates:
+  - Button: 55.2%
+  - Small Blind: 42.1%
+  - Big Blind: 38.5%
+  - Early Position: 45.3%
+  - Middle Position: 48.7%
+  - Late Position: 52.1%
+- Showdown Ratio: 0.65 (65% of winnings from showdown)
+```
+
 ## Output Format
 
 The system provides tau-bench style terminal output:
@@ -249,6 +346,12 @@ Starting evaluation system...
    Win Rate: 45.00%
    Net Chips: +150
    Performance Score: 67.5
+   
+## Detailed Metrics:
+- Aggression Factor: 2.3 (Aggressive)
+- VPIP: 28.5% (Moderate)
+- PFR: 15.2% (Moderate)
+- Fold to 3-Bet: 60.0%
 
 🏆 Final Tournament Rankings:
   1. Smart Agent - 3 wins, 2800 chips (60.0% win rate)

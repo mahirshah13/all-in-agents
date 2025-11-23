@@ -45,6 +45,44 @@
 
         <!-- Main Poker Table -->
         <main class="poker-table-container">
+            <!-- Tournament Progress Overlay -->
+            <div id="tournament-progress" class="tournament-progress-overlay">
+                <div class="tournament-info">
+                    <h3>🏆 Tournament Progress</h3>
+                    <div class="progress-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">Tournament:</span>
+                            <span id="current-tournament" class="stat-value">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Round:</span>
+                            <span id="current-round-num" class="stat-value">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Total Hands:</span>
+                            <span id="total-hands" class="stat-value">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Evaluation Summary Modal (Big Screen) -->
+            <div id="summary-modal" class="summary-modal" style="display: none;">
+                <div class="summary-modal-content">
+                    <div class="summary-header">
+                        <h2>🏆 Tournament Evaluation Summary</h2>
+                        <button id="close-summary" class="close-button">×</button>
+                    </div>
+                    <div id="summary-content" class="summary-content">
+                        <!-- Summary will be populated here -->
+                    </div>
+                    <div class="summary-actions">
+                        <button id="start-new-tournament" class="action-button">Start New Tournament</button>
+                        <a href="/select" class="action-button secondary">Change Agents</a>
+                    </div>
+                </div>
+            </div>
+
             <div class="poker-table">
                 <!-- Community Cards Area (Center) -->
                 <div class="community-area">
@@ -75,6 +113,33 @@
             <h2>📋 Action Log</h2>
             <div id="action-log" class="log-container">
                 <div class="log-entry info">Waiting for game to start...</div>
+            </div>
+
+            <div class="analysis-section">
+                <h3>📈 Tournament Summary</h3>
+                <div id="summary-meta" class="summary-meta">Summary will appear after tournaments finish.</div>
+                <div id="agent-stats" class="agent-stats-grid"></div>
+            </div>
+
+            <div class="analysis-section">
+                <h3>🧭 Assessment Criteria</h3>
+                <ul id="assessment-criteria" class="criteria-list">
+                    <li>Waiting for evaluation...</li>
+                </ul>
+            </div>
+
+            <div class="analysis-section">
+                <h3>🧠 Evaluation Examples</h3>
+                <div id="evaluation-examples" class="examples-list">
+                    <p class="placeholder">Examples will be displayed after the tournament summary is ready.</p>
+                </div>
+            </div>
+
+            <div class="analysis-section">
+                <h3>✅ Benchmark Reliability</h3>
+                <div id="benchmark-results" class="benchmark-list">
+                    <p class="placeholder">Benchmark accuracy will be displayed here.</p>
+                </div>
             </div>
         </aside>
     </div>

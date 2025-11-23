@@ -260,7 +260,8 @@ class PokerAssessmentManager(AgentExecutor):
         
         # Log configuration values being used
         self.logger.info(f"Configuration loaded:")
-        self.logger.info(f"  - Games per agent: {self.evaluation_config.get('games_per_agent', 10)}")
+        hands_per_tournament = self.evaluation_config.get("hands_per_tournament") or self.evaluation_config.get("games_per_agent", 10)
+        self.logger.info(f"  - Hands per tournament: {hands_per_tournament}")
         self.logger.info(f"  - Tournament games: {self.evaluation_config.get('tournament_games', 5)}")
         self.logger.info(f"  - Small blind: {self.poker_rules.get('small_blind', 10)}")
         self.logger.info(f"  - Big blind: {self.poker_rules.get('big_blind', 20)}")
@@ -271,15 +272,32 @@ class PokerAssessmentManager(AgentExecutor):
         """Load evaluation configuration with environment variable overrides"""
         evaluation_config = config.copy()
         
+        # Support both old name (games_per_agent) and new name (hands_per_tournament)
+        # New name takes precedence, but fall back to old name for backward compatibility
+        if "hands_per_tournament" in evaluation_config:
+            evaluation_config["games_per_agent"] = evaluation_config["hands_per_tournament"]
+        elif "games_per_agent" in evaluation_config:
+            # Keep games_per_agent for backward compatibility
+            pass
+        
         # Override with environment variables if they exist
-        if os.getenv("EVALUATION_GAMES_PER_AGENT"):
+        if os.getenv("EVALUATION_HANDS_PER_TOURNAMENT"):
+            evaluation_config["hands_per_tournament"] = int(os.getenv("EVALUATION_HANDS_PER_TOURNAMENT"))
+            evaluation_config["games_per_agent"] = evaluation_config["hands_per_tournament"]
+        elif os.getenv("EVALUATION_GAMES_PER_AGENT"):
             evaluation_config["games_per_agent"] = int(os.getenv("EVALUATION_GAMES_PER_AGENT"))
+            if "hands_per_tournament" not in evaluation_config:
+                evaluation_config["hands_per_tournament"] = evaluation_config["games_per_agent"]
         
         if os.getenv("EVALUATION_TOURNAMENT_GAMES"):
             evaluation_config["tournament_games"] = int(os.getenv("EVALUATION_TOURNAMENT_GAMES"))
         
         if os.getenv("EVALUATION_TIMEOUT"):
             evaluation_config["evaluation_timeout"] = int(os.getenv("EVALUATION_TIMEOUT"))
+        
+        # Ensure hands_per_tournament is set (default to 10 if not specified)
+        if "hands_per_tournament" not in evaluation_config:
+            evaluation_config["hands_per_tournament"] = evaluation_config.get("games_per_agent", 10)
         
         return evaluation_config
 
@@ -632,8 +650,8 @@ Use this information to refine your decision-making in future hands."""
                 self.print_status(f"Failed to initialize {agent.name}: {e}", "ERROR")
                 raise e  # Don't simulate, fail if can't communicate
             
-            # Small delay between agents
-            await asyncio.sleep(0.5)
+            # Small delay between agents (slower for better visibility)
+            await asyncio.sleep(2.0)  # Slower for better visibility
 
     async def _send_message_to_agent_a2a(self, agent: WhiteAgentConfig, message: str) -> str:
         """Send message to agent via A2A protocol using my_a2a utilities"""
@@ -748,6 +766,13 @@ Use this information to refine your decision-making in future hands."""
         tournament_stats = {aid: {"wins": 0, "total_chips": 0, "hands_won": 0, "total_hands": 0} for aid in agent_ids}
         
         for game_num in range(num_games):
+            # Broadcast tournament start
+            broadcast_game_update("tournament_start", {
+                "tournament_id": f"{self.current_tournament_id[:8] if self.current_tournament_id else 'N/A'}-{game_num + 1}",
+                "game_number": game_num + 1,
+                "total_games": num_games
+            })
+            
             # Reset agent states between tournaments to give fresh context
             if game_num > 0:  # Don't reset before first game (already done in _run_a2a_evaluation)
                 import uuid
@@ -839,6 +864,9 @@ Use this information to refine your decision-making in future hands."""
             agent_name = self.white_agents[aid].name
             win_rate = stats["wins"] / num_games
             print(f"  {i}. {agent_name} - {stats['wins']} wins, {stats['total_chips']} chips ({win_rate:.1%} win rate)")
+        
+        # Broadcast structured summary to frontend
+        self._broadcast_evaluation_summary(tournament_stats, num_games)
 
     async def _run_poker_game_a2a(self, agent_ids: List[str]) -> Optional[Dict[str, Any]]:
         """Run a real poker game using A2A communication with agents"""
@@ -849,7 +877,8 @@ Use this information to refine your decision-making in future hands."""
             game_log = []
             
             # Play multiple hands until one player is eliminated or max hands reached
-            max_hands = self.evaluation_config.get("games_per_agent", 10)
+            # Use hands_per_tournament if available, otherwise fall back to games_per_agent
+            max_hands = self.evaluation_config.get("hands_per_tournament") or self.evaluation_config.get("games_per_agent", 10)
             for hand_num in range(max_hands):
                 print("\n" + "="*70)
                 print(f"🃏 HAND {hand_num + 1} of {max_hands}")
@@ -917,8 +946,8 @@ Use this information to refine your decision-making in future hands."""
                     
                     broadcast_game_update("game_state", full_state)
                 
-                # Delay for frontend visualization
-                await asyncio.sleep(1.5)
+                # Delay for frontend visualization (slower for better visibility)
+                await asyncio.sleep(2.5)
                 
                 # Show dealer and blind positions
                 game_state = self.poker_engine.game_state
@@ -960,6 +989,7 @@ Use this information to refine your decision-making in future hands."""
                     active_players = [p for p in self.poker_engine.game_state.players if p.chips > 0]
                     if len(active_players) < 2:
                         print(f"\n⚠️  Player eliminated after {hand_num + 1} hands. Ending game early.")
+                        await self._reveal_remaining_rounds_for_visuals(reason="player_eliminated")
                         break
             
             # Determine game winner based on final chips
@@ -991,9 +1021,18 @@ Use this information to refine your decision-making in future hands."""
             hand_log = []
             last_round = None
             round_started = False  # Track if we've started a new round
+            max_iterations = 200  # Maximum iterations to prevent infinite loops
+            iteration_count = 0
+            last_player_action = None  # Track last player/action to detect loops
             
             # Play through betting rounds
             while self.poker_engine.game_state.round != "showdown":
+                iteration_count += 1
+                if iteration_count > max_iterations:
+                    print(f"⚠️  Maximum iterations ({max_iterations}) reached, forcing showdown")
+                    self.poker_engine.game_state.round = "showdown"
+                    self.poker_engine._determine_winner()
+                    break
                 game_state = self.poker_engine.game_state
                 
                 # Show new betting round header
@@ -1022,8 +1061,8 @@ Use this information to refine your decision-making in future hands."""
                     })
                     print(f"📡 Broadcasted round change: {game_state.round} with {len(game_state.community_cards)} community cards")
                     
-                    # Delay for frontend visualization
-                    await asyncio.sleep(1.5)
+                    # Delay for frontend visualization (slower for better visibility)
+                    await asyncio.sleep(2.5)
                 
                 # Get current game state
                 game_state = self.poker_engine.game_state
@@ -1048,12 +1087,34 @@ Use this information to refine your decision-making in future hands."""
                                 "community_cards": [str(card) for card in game_state.community_cards]
                             })
                             print(f"📡 Forced round change to {game_state.round} with {len(game_state.community_cards)} community cards")
-                            await asyncio.sleep(1.0)
+                            await asyncio.sleep(2.0)  # Slower for better visibility
                             continue
                     
                 current_player = game_state.players[game_state.current_player]
                 agent = self.white_agents.get(current_player.id)
                 agent_name = agent.name if agent else current_player.name
+                
+                # Detect infinite loop: same player acting repeatedly
+                current_action_key = (current_player.id, game_state.round, game_state.current_bet)
+                if current_action_key == last_player_action:
+                    print(f"⚠️  Detected loop: {agent_name} acting repeatedly, forcing round advance")
+                    if self.poker_engine._is_round_complete():
+                        self.poker_engine._advance_round()
+                        continue
+                    else:
+                        # Force fold if round can't complete
+                        print(f"⚠️  Forcing {agent_name} to fold to break loop")
+                        self.poker_engine.process_action(current_player.id, Action.FOLD, 0)
+                        continue
+                last_player_action = current_action_key
+                
+                # Skip if player is all-in or has no chips
+                if current_player.is_all_in or current_player.chips <= 0:
+                    print(f"⚠️  {agent_name} is all-in or has no chips, skipping")
+                    self.poker_engine._next_player()
+                    if self.poker_engine._is_round_complete():
+                        self.poker_engine._advance_round()
+                    continue
                 
                 if current_player.id in agent_ids:
                     # Show player's turn with their cards
@@ -1096,7 +1157,7 @@ Use this information to refine your decision-making in future hands."""
                         })
                     
                     broadcast_game_update("game_state", full_game_state)
-                    await asyncio.sleep(0.5)  # Brief pause before decision
+                    await asyncio.sleep(2.0)  # Slower for better visibility  # Brief pause before decision (slower for better visibility)
                     
                     # Get decision from agent via A2A and execute it
                     decision_result = await self._get_agent_decision_a2a(current_player.id, game_state)
@@ -1130,6 +1191,44 @@ Use this information to refine your decision-making in future hands."""
                         else:
                             print()
                         
+                        # Get updated game state IMMEDIATELY after action (chips should be updated)
+                        game_state = self.poker_engine.game_state
+                        current_round = game_state.round
+                        
+                        # Broadcast updated game state IMMEDIATELY with updated chips
+                        immediate_state = {
+                            "hand_number": game_state.hand_number,
+                            "round": current_round,
+                            "pot": game_state.pot,
+                            "current_bet": game_state.current_bet,
+                            "community_cards": [str(card) for card in game_state.community_cards],
+                            "players": [],
+                            "current_player": game_state.current_player
+                        }
+                        
+                        # Add all players with UPDATED chips
+                        for idx, player in enumerate(game_state.players):
+                            agent = self.white_agents.get(player.id)
+                            player_cards = []
+                            if player.cards:
+                                player_cards = [str(card) for card in player.cards]
+                            
+                            immediate_state["players"].append({
+                                "id": player.id,
+                                "name": agent.name if agent else player.name,
+                                "type": agent.type if agent else "unknown",
+                                "chips": player.chips,  # UPDATED chips after action
+                                "current_bet": player.current_bet,
+                                "is_active": player.is_active,
+                                "is_all_in": player.is_all_in,
+                                "cards": player_cards
+                            })
+                        
+                        immediate_state["agent_name"] = agent_name
+                        immediate_state["agent_type"] = agent.type if agent else "unknown"
+                        broadcast_game_update("game_state", immediate_state)
+                        await asyncio.sleep(0.5)  # Brief pause to show chip update
+                        
                         # Broadcast player action
                         game_state_dict = self.poker_engine.get_game_state_for_player(current_player.id)
                         # Add agent info to game state
@@ -1146,10 +1245,6 @@ Use this information to refine your decision-making in future hands."""
                             "game_state": game_state_dict
                         })
                         
-                        # Get updated game state after action
-                        game_state = self.poker_engine.game_state
-                        current_round = game_state.round
-                        
                         # Check if round changed after action
                         if current_round != last_round and last_round is not None:
                             # Round advanced - broadcast round change first
@@ -1160,7 +1255,7 @@ Use this information to refine your decision-making in future hands."""
                                 "community_cards": [str(card) for card in game_state.community_cards]
                             })
                             last_round = current_round
-                            await asyncio.sleep(1.0)  # Pause to show round change
+                            await asyncio.sleep(2.0)  # Pause to show round change (slower for better visibility)
                         
                         # Broadcast updated game state with all player info including agent types
                         full_game_state = {
@@ -1199,8 +1294,8 @@ Use this information to refine your decision-making in future hands."""
                         full_game_state["agent_type"] = agent.type if agent else "unknown"
                         broadcast_game_update("game_state", full_game_state)
                         
-                        # Delay for frontend visualization
-                        await asyncio.sleep(1.2)
+                        # Delay for frontend visualization (slower for better visibility)
+                        await asyncio.sleep(2.0)
                     else:
                         # Default to fold if no decision
                         self.poker_engine.process_action(current_player.id, Action.FOLD, 0)
@@ -1226,40 +1321,58 @@ Use this information to refine your decision-making in future hands."""
             print(f"\n🎴 SHOWDOWN")
             print("-" * 70)
             
-            # Show all players' cards
-            for player in self.poker_engine.game_state.players:
+            # Determine winner FIRST (this distributes chips)
+            # The poker engine's _determine_winner() is called automatically when round becomes "showdown"
+            # But we need to ensure it's been called and chips are distributed
+            game_state = self.poker_engine.game_state
+            if game_state.round != "showdown":
+                # Force showdown if not already there
+                self.poker_engine.game_state.round = "showdown"
+                self.poker_engine._determine_winner()
+                game_state = self.poker_engine.game_state
+            
+            # Wait a moment for chip distribution to complete
+            await asyncio.sleep(0.5)
+            
+            # Show all players' cards AFTER chip distribution
+            for player in game_state.players:
                 if player.is_active:
                     agent = self.white_agents.get(player.id)
                     agent_name = agent.name if agent else player.name
                     cards_str = " ".join([str(card) for card in player.cards])
                     print(f"   {agent_name}: {cards_str} (Chips: 💰{player.chips})")
             
-            # Determine hand winner
-            # The poker engine should have determined the winner through _determine_winner
-            # For now, use the player with most chips as fallback
-            winner = max(self.poker_engine.game_state.players, key=lambda p: p.chips).id
+            # Determine winner (player with most chips after distribution)
+            winner = max(game_state.players, key=lambda p: p.chips).id
             winner_agent = self.white_agents.get(winner)
             winner_name = winner_agent.name if winner_agent else winner
             
             print(f"\n🏆 Winner: {winner_name}")
-            print(f"💰 Final Pot: {self.poker_engine.game_state.pot}")
+            print(f"💰 Final Pot: {game_state.pot} (should be 0 after distribution)")
             
-            # Broadcast final game state with community cards before hand end
-            game_state = self.poker_engine.game_state
+            # Verify chip distribution
+            total_chips = sum(p.chips for p in game_state.players)
+            expected_total = len(game_state.players) * self.poker_rules.get("starting_chips", 1000)
+            print(f"💰 Total chips in play: {total_chips} (expected: {expected_total})")
+            
+            # Delay to show showdown
+            await asyncio.sleep(2.0)
+            
+            # Broadcast final game state with community cards AFTER chip distribution
             community_cards_list = [str(card) for card in game_state.community_cards] if game_state.community_cards else []
             print(f"📡 Broadcasting hand_end with {len(community_cards_list)} community cards: {community_cards_list}")
             
             final_state = {
                 "hand_number": game_state.hand_number,
                 "round": game_state.round,
-                "pot": game_state.pot,
+                "pot": game_state.pot,  # Should be 0 after distribution
                 "current_bet": game_state.current_bet,
                 "community_cards": community_cards_list,
                 "players": [],
                 "current_player": -1
             }
             
-            # Add all players with agent info
+            # Add all players with agent info (WITH UPDATED CHIPS)
             for idx, player in enumerate(game_state.players):
                 agent = self.white_agents.get(player.id)
                 player_cards = []
@@ -1270,26 +1383,31 @@ Use this information to refine your decision-making in future hands."""
                     "id": player.id,
                     "name": agent.name if agent else player.name,
                     "type": agent.type if agent else "unknown",
-                    "chips": player.chips,
+                    "chips": player.chips,  # This should have updated chips after distribution
                     "current_bet": player.current_bet,
                     "is_active": player.is_active,
                     "is_all_in": player.is_all_in,
                     "cards": player_cards
                 })
             
+            # Broadcast game state with updated chips
             broadcast_game_update("game_state", final_state)
+            await asyncio.sleep(2.0)  # Slower for better visibility  # Delay to show updated chips
             
             # Broadcast hand end with community cards
             hand_end_data = {
                 "winner": winner_name,
                 "winner_id": winner,
-                "pot": self.poker_engine.game_state.pot,
-                "final_chips": {p.id: p.chips for p in self.poker_engine.game_state.players},
+                "pot": game_state.pot,  # Should be 0
+                "final_chips": {p.id: p.chips for p in game_state.players},  # Updated chips
                 "community_cards": community_cards_list,
                 "round": game_state.round
             }
             broadcast_game_update("hand_end", hand_end_data)
             print(f"📡 Broadcasted hand_end with {len(community_cards_list)} community cards: {community_cards_list}")
+            
+            # Additional delay to show final state
+            await asyncio.sleep(2.0)
             
             # Track results for all players
             starting_chips = self.poker_rules.get("starting_chips", 1000)
@@ -1688,6 +1806,200 @@ Good luck!"""
                 print(f"     Average Score: {avg_score:.2f}/1.00")
                 print(f"     Benchmark Pass Rate: {'✅ PASS' if accuracy >= 75 and avg_score >= 0.80 else '❌ FAIL'}")
     
+    def _get_assessment_criteria(self) -> List[str]:
+        """List of what the green agent evaluates"""
+        return [
+            "CORRECTNESS: Is the action valid and legal?",
+            "STRATEGIC_QUALITY: Is the action strategically sound?",
+            "CONSISTENCY: Is the agent consistent with its stated strategy?",
+            "RESPONSE_FORMAT: Does the response follow the required format?",
+            "REASONING_QUALITY: Is the reasoning logical and sound?",
+            "POSITION_AWARENESS: Does the agent consider position?",
+            "POT_ODDS_AWARENESS: Does the agent consider pot odds?",
+            "STACK_MANAGEMENT: Does the agent manage stack size appropriately?"
+        ]
+
+    def _build_evaluation_examples_data(self, limit: int = 3) -> List[Dict[str, Any]]:
+        """Serialize evaluation examples for frontend"""
+        examples = EvaluationExamples.get_examples()
+        data = []
+        for example in examples[:limit]:
+            assessments = [
+                {
+                    "dimension": dimension.value,
+                    "score": round(score, 2),
+                    "explanation": explanation
+                }
+                for dimension, (score, explanation) in example.assessments.items()
+            ]
+            data.append({
+                "scenario": example.scenario_description,
+                "agent_type": example.agent_type,
+                "expected_action": example.expected_action,
+                "agent_response": example.agent_response,
+                "overall_score": round(example.overall_score, 2),
+                "assessments": assessments
+            })
+        return data
+
+    def _build_benchmark_summary_data(self) -> List[Dict[str, Any]]:
+        """Serialize benchmark reliability data"""
+        if not self.benchmark_results:
+            return []
+        
+        ground_truth = get_ground_truth_test_cases()
+        summary = []
+        for agent_id, agent_results in self.benchmark_results.items():
+            agent = self.white_agents.get(agent_id)
+            agent_name = agent.name if agent else agent_id
+            
+            correct_actions = 0
+            total_tests = 0
+            total_score = 0.0
+            tests = []
+            
+            for test_id, expected in ground_truth.items():
+                result = agent_results.get(test_id)
+                if not result:
+                    continue
+                
+                action = result.get("action", "")
+                score = result.get("score", 0.0)
+                correct = action == expected["expected_action"]
+                total_tests += 1
+                total_score += score
+                if correct:
+                    correct_actions += 1
+                
+                tests.append({
+                    "test_id": test_id,
+                    "expected_action": expected["expected_action"],
+                    "agent_action": action,
+                    "score": round(score, 2),
+                    "passed": correct and score >= expected["min_score"]
+                })
+            
+            if total_tests == 0:
+                continue
+            
+            accuracy = correct_actions / total_tests
+            avg_score = total_score / total_tests
+            summary.append({
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "accuracy": round(accuracy, 3),
+                "average_score": round(avg_score, 2),
+                "pass": accuracy >= 0.75 and avg_score >= 0.80,
+                "tests": tests
+            })
+        
+        return summary
+
+    def _build_agents_summary(self, tournament_stats: Dict[str, Dict[str, Any]], num_games: int) -> List[Dict[str, Any]]:
+        """Serialize each agent's performance metrics"""
+        if not self.evaluation_results:
+            return []
+        
+        sorted_results = sorted(
+            self.evaluation_results.values(),
+            key=lambda x: x.performance_score,
+            reverse=True
+        )
+        
+        agents_summary = []
+        for result in sorted_results:
+            stats = tournament_stats.get(result.agent_id, {})
+            metrics = result.metrics or AgentMetrics()
+            af = metrics.calculate_af()
+            vpip = metrics.calculate_vpip()
+            pfr = metrics.calculate_pfr()
+            fold_to_3bet = metrics.calculate_fold_to_3bet()
+            positional_wr = metrics.get_positional_win_rate()
+            showdown_ratio = metrics.get_showdown_ratio()
+            
+            agents_summary.append({
+                "agent_id": result.agent_id,
+                "name": result.agent_name,
+                "type": result.agent_type,
+                "wins": stats.get("wins", 0),
+                "games_played": num_games,
+                "hands_won": result.hands_won,
+                "total_hands": result.total_hands,
+                "win_rate": round(result.win_rate, 3),
+                "net_chips": result.net_chips,
+                "performance_score": round(result.performance_score, 1),
+                "metrics": {
+                    "aggression_factor": "∞" if af == float('inf') else round(af, 2),
+                    "vpip": round(vpip, 1),
+                    "pfr": round(pfr, 1),
+                    "fold_to_3bet": round(fold_to_3bet, 1),
+                    "showdown_ratio": round(showdown_ratio, 2),
+                    "positional_win_rate": {pos: round(val, 1) for pos, val in positional_wr.items()},
+                    "showdown_winnings": metrics.showdown_winnings,
+                    "non_showdown_winnings": metrics.non_showdown_winnings
+                },
+                "learning_notes": self.agent_memory.get(result.agent_id, [])[-3:]
+            })
+        
+        return agents_summary
+
+    def _broadcast_evaluation_summary(self, tournament_stats: Dict[str, Dict[str, Any]], num_games: int):
+        """Send structured summary to frontend"""
+        try:
+            summary_payload = {
+                "meta": {
+                    "tournament_id": self.current_tournament_id[:8] if self.current_tournament_id else "N/A",
+                    "num_tournaments": num_games,
+                    "hands_per_tournament": self.evaluation_config.get("hands_per_tournament") or self.evaluation_config.get("games_per_agent", 10),
+                    "learning_enabled": True
+                },
+                "tournament_id": self.current_tournament_id[:8] if self.current_tournament_id else "N/A",
+                "tournaments_played": num_games,
+                "hands_per_tournament": self.evaluation_config.get("games_per_agent", 10),
+                "timestamp": time.time(),
+                "learning_enabled": True,
+                "agents": self._build_agents_summary(tournament_stats, num_games),
+                "assessment_criteria": self._get_assessment_criteria(),
+                "evaluation_examples": self._build_evaluation_examples_data(),
+                "benchmark": self._build_benchmark_summary_data()
+            }
+            broadcast_game_update("evaluation_summary", summary_payload)
+            self.logger.info("Broadcasted evaluation summary to frontend")
+        except Exception as e:
+            self.logger.error(f"Failed to broadcast evaluation summary: {e}")
+
+    async def _reveal_remaining_rounds_for_visuals(self, reason: str = ""):
+        """Force-show flop/turn/river for visualization when a hand ends early"""
+        game_state = self.poker_engine.game_state
+        if not game_state:
+            return
+        
+        rounds_sequence = ["preflop", "flop", "turn", "river", "showdown"]
+        current_round = game_state.round if game_state.round in rounds_sequence else "preflop"
+        idx = rounds_sequence.index(current_round)
+        
+        while game_state.round != "showdown" and idx < len(rounds_sequence) - 1:
+            next_round = rounds_sequence[idx + 1]
+            cards_to_deal = 0
+            if next_round == "flop":
+                cards_to_deal = max(0, 3 - len(game_state.community_cards))
+            elif next_round in ("turn", "river"):
+                cards_to_deal = 1
+            
+            if cards_to_deal > 0:
+                self.poker_engine._deal_community_cards(cards_to_deal)
+            
+            game_state.round = next_round
+            broadcast_game_update("round_change", {
+                "round": game_state.round,
+                "pot": game_state.pot,
+                "current_bet": game_state.current_bet,
+                "community_cards": [str(card) for card in game_state.community_cards],
+                "reason": reason
+            })
+            await asyncio.sleep(2.0)  # Slower for better visibility
+            idx += 1
+
     async def run_benchmark_tests(self):
         """Run benchmark tests with ground-truth test cases"""
         print("\n" + "="*100)

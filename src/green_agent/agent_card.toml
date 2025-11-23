@@ -17,8 +17,10 @@ endpoint = "http://localhost:8000"
 discovery_endpoint = "/.well-known/agent.json"
 
 [evaluation]
-games_per_agent = 10
-tournament_games = 10
+# Number of hands (rounds) to play per tournament
+hands_per_tournament = 10
+# Number of tournaments to run
+tournament_games = 3
 evaluation_timeout = 30
 run_benchmark_tests = true
 [[evaluation.all_white_agents]]
@@ -85,6 +87,13 @@ description = "Ultra-Aggressive"
 url = "http://localhost:8003"
 
 [[evaluation.white_agents]]
+id = "smart_agent"
+name = "Smart Agent"
+type = "smart"
+description = "Pot Odds & Position"
+url = "http://localhost:8004"
+
+[[evaluation.white_agents]]
 id = "adaptive"
 name = "Adaptive Heuristic"
 type = "adaptive"
@@ -95,7 +104,7 @@ url = "http://localhost:8006"
 small_blind = 10
 big_blind = 20
 starting_chips = 1000
-max_players = 4
+max_players = 5
 hand_timeout = 30
 
 [metrics]

@@ -103,10 +103,10 @@
 </head>
 <body>
     <div class="selection-container">
-        <h1>🃏 Select 4 Agents</h1>
+        <h1>🃏 Select 5 Agents</h1>
         <p class="subtitle">Choose which agents will play in this tournament</p>
         <div class="selected-count">
-            <span id="selected-count">0</span> / 4 selected
+            <span id="selected-count">0</span> / 5 selected
         </div>
         <div class="agents-grid" id="agents-grid">
             <!-- Agents will be loaded here -->
@@ -124,7 +124,7 @@
         ];
         
         let selectedAgents = [];
-        const maxSelection = 4;
+        const maxSelection = 5;
         
         function renderAgents() {
             const grid = document.getElementById('agents-grid');

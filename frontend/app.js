@@ -6,6 +6,9 @@ class PokerVisualization {
         this.players = [];
         this.handNumber = 0;
         this.currentRound = 'preflop';
+        this.currentTournament = '1';
+        this.totalHands = 0;
+        this.lastSummary = null;
         this.init();
     }
 
@@ -65,20 +68,28 @@ class PokerVisualization {
         try {
             switch (message.type) {
                 case 'game_state':
+                    console.log('🎮 Game state received:', message.data);
                     this.updateGameState(message.data);
-                    // Explicitly update community cards
+                    // Explicitly update community cards - this is critical!
                     if (message.data.community_cards) {
+                        console.log('📋 Game state has community cards:', message.data.community_cards);
                         this.updateCommunityCards(message.data.community_cards);
+                    } else {
+                        console.log('ℹ️ Game state has no community cards (normal for preflop)');
                     }
                     break;
                 case 'hand_start':
                     this.handleHandStart(message.data);
                     break;
                 case 'round_change':
+                    console.log('🔄 Round change received:', message.data);
                     this.handleRoundChange(message.data);
-                    // Explicitly update community cards
+                    // Explicitly update community cards - this is critical!
                     if (message.data.community_cards) {
+                        console.log('📋 Round change has community cards:', message.data.community_cards);
                         this.updateCommunityCards(message.data.community_cards);
+                    } else {
+                        console.warn('⚠️ Round change has NO community cards');
                     }
                     break;
                 case 'player_action':
@@ -94,6 +105,9 @@ class PokerVisualization {
                     if (message.data.community_cards) {
                         this.updateCommunityCards(message.data.community_cards);
                     }
+                    break;
+                case 'evaluation_summary':
+                    this.displayEvaluationSummary(message.data);
                     break;
                 case 'history':
                     this.loadHistory(message.data);
@@ -134,8 +148,13 @@ class PokerVisualization {
             if (el) el.textContent = `💰${state.current_bet}`;
         }
 
-        // Update community cards
-        this.updateCommunityCards(state.community_cards || []);
+        // Update community cards - ALWAYS call this, even if empty
+        const communityCards = state.community_cards || [];
+        console.log('📊 updateGameState - community_cards:', communityCards, 'length:', communityCards.length, 'isArray:', Array.isArray(communityCards));
+        if (communityCards.length > 0) {
+            console.log('🃏 Community cards found in game_state, updating display');
+        }
+        this.updateCommunityCards(communityCards);
 
         // Update players around table
         if (state.players && Array.isArray(state.players) && state.players.length > 0) {
@@ -308,10 +327,14 @@ class PokerVisualization {
             seat.classList.add(`position-${index}`);
             
             if (index === currentPlayerIndex && currentPlayerIndex >= 0) {
-                seat.classList.add('active');
+                seat.classList.add('active', 'current-turn');
+            } else {
+                seat.classList.remove('current-turn');
             }
             if (player.is_active === false) {
                 seat.classList.add('folded');
+            } else {
+                seat.classList.remove('folded');
             }
 
             const agentName = player.name || `Player ${index + 1}`;
@@ -347,6 +370,10 @@ class PokerVisualization {
     handleHandStart(data) {
         console.log('Hand start data:', data);
         this.handNumber = data.hand_number || 0;
+        this.totalHands = (this.totalHands || 0) + 1;
+        this.currentRound = Math.floor((this.totalHands - 1) / 10) + 1; // Round number (1-10)
+        this.updateTournamentProgress();
+        
         const playersList = data.players ? data.players.map(p => `${p.name} (${p.type || 'unknown'})`).join(', ') : '';
         this.addLogEntry(`Hand ${this.handNumber} started with players: ${playersList}`, 'info');
         
@@ -482,12 +509,13 @@ class PokerVisualization {
                 }
             })
             .catch(() => {
-                // If endpoint doesn't exist, show default agents
+                // If endpoint doesn't exist, show default agents (5 agents)
                 const defaultAgents = [
                     {id: "tagbot", name: "TAGBot", description: "Tight-Aggressive"},
                     {id: "montecarlo", name: "Monte Carlo", description: "Simulation-Based"},
                     {id: "maniac", name: "Maniac", description: "Ultra-Aggressive"},
-                    {id: "smart_agent", name: "Smart Agent", description: "Pot Odds & Position"}
+                    {id: "smart_agent", name: "Smart Agent", description: "Pot Odds & Position"},
+                    {id: "adaptive", name: "Adaptive Heuristic", description: "Stack-Aware Adaptive"}
                 ];
                 this.displaySelectedAgents(defaultAgents);
             });
@@ -507,6 +535,264 @@ class PokerVisualization {
             `;
             botList.appendChild(item);
         });
+    }
+
+    displayEvaluationSummary(summary) {
+        if (!summary) return;
+        this.addLogEntry(`Evaluation summary received for tournament ${summary.tournament_id}`, 'info');
+        
+        // Store summary for later reference
+        this.lastSummary = summary;
+        
+        // Update sidebar
+        const metaEl = document.getElementById('summary-meta');
+        if (metaEl) {
+            metaEl.innerHTML = `
+                <p><strong>Tournament ID:</strong> ${this.escapeHtml(summary.tournament_id || 'N/A')}</p>
+                <p><strong>Tournaments Played:</strong> ${summary.tournaments_played || 0}</p>
+                <p><strong>Hands per Tournament:</strong> ${summary.hands_per_tournament || 0}</p>
+                <p><strong>Learning:</strong> ${summary.learning_enabled ? 'Enabled ✅' : 'Disabled ⚠️'}</p>
+            `;
+        }
+        
+        // Show big screen modal
+        this.showSummaryModal(summary);
+        
+        const agentStatsEl = document.getElementById('agent-stats');
+        if (agentStatsEl && summary.agents) {
+            agentStatsEl.innerHTML = summary.agents.map(agent => {
+                const metrics = agent.metrics || {};
+                const positional = metrics.positional_win_rate || {};
+                const positionalHtml = Object.keys(positional).map(pos => `<span>${this.escapeHtml(pos)}: ${positional[pos]}%</span>`).join('');
+                const learningNotes = (agent.learning_notes || []).map(note => `<li>${this.escapeHtml(note)}</li>`).join('');
+                return `
+                    <div class="agent-stat-card">
+                        <div class="agent-stat-header">
+                            <div class="name">${this.escapeHtml(agent.name)}</div>
+                            <div class="type">${this.escapeHtml(agent.type || '')}</div>
+                        </div>
+                        <div class="agent-metrics">
+                            <div>Wins: ${agent.wins || 0} · Hands Won: ${agent.hands_won || 0}/${agent.total_hands || 0}</div>
+                            <div>Win Rate: ${this.formatPercentage(agent.win_rate)}</div>
+                            <div>Net Chips: ${agent.net_chips >= 0 ? '+' : ''}${agent.net_chips}</div>
+                            <div>Performance Score: ${agent.performance_score}</div>
+                        </div>
+                        <div class="metrics-row">
+                            <span>AF: ${metrics.aggression_factor}</span>
+                            <span>VPIP: ${metrics.vpip}%</span>
+                            <span>PFR: ${metrics.pfr}%</span>
+                            <span>Fold to 3-Bet: ${metrics.fold_to_3bet}%</span>
+                            <span>Showdown Ratio: ${metrics.showdown_ratio}</span>
+                        </div>
+                        ${positionalHtml ? `<div class="metrics-row">${positionalHtml}</div>` : ''}
+                        ${learningNotes ? `<div class="learning-notes"><strong>Learning Notes:</strong><ul>${learningNotes}</ul></div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        const criteriaEl = document.getElementById('assessment-criteria');
+        if (criteriaEl && summary.assessment_criteria) {
+            criteriaEl.innerHTML = summary.assessment_criteria.map(item => `<li>${this.escapeHtml(item)}</li>`).join('');
+        }
+        
+        const examplesEl = document.getElementById('evaluation-examples');
+        if (examplesEl && summary.evaluation_examples) {
+            examplesEl.innerHTML = summary.evaluation_examples.map(example => `
+                <div class="example-card">
+                    <h4>${this.escapeHtml(example.scenario)}</h4>
+                    <p><strong>Agent Type:</strong> ${this.escapeHtml(example.agent_type || 'N/A')}</p>
+                    <p><strong>Expected Action:</strong> ${this.escapeHtml(example.expected_action || 'N/A')}</p>
+                    <p><strong>Response:</strong> ${this.escapeHtml(example.agent_response?.action || 'N/A')} ${example.agent_response?.amount ? `(${example.agent_response.amount})` : ''}</p>
+                    <p><strong>Reasoning:</strong> ${this.escapeHtml(example.agent_response?.reasoning || 'N/A')}</p>
+                    <p><strong>Overall Score:</strong> ${example.overall_score}</p>
+                    <ul>
+                        ${example.assessments.map(assess => `<li><strong>${this.escapeHtml(assess.dimension)}:</strong> ${assess.score} - ${this.escapeHtml(assess.explanation)}</li>`).join('')}
+                    </ul>
+                </div>
+            `).join('');
+        }
+        
+        const benchmarkEl = document.getElementById('benchmark-results');
+        if (benchmarkEl && summary.benchmark) {
+            benchmarkEl.innerHTML = summary.benchmark.map(entry => `
+                <div class="benchmark-card">
+                    <h4>${this.escapeHtml(entry.agent_name)} · Accuracy: ${this.formatPercentage(entry.accuracy)}</h4>
+                    <p>Average Score: ${entry.average_score} · ${entry.pass ? 'PASS ✅' : 'FAIL ⚠️'}</p>
+                    <ul>
+                        ${entry.tests.slice(0, 4).map(test => `<li>${this.escapeHtml(test.test_id)} → ${this.escapeHtml(test.agent_action || 'N/A')} (${test.passed ? '✅' : '❌'})</li>`).join('')}
+                    </ul>
+                </div>
+            `).join('');
+        }
+    }
+    
+    formatPercentage(value, decimals = 1) {
+        if (value === undefined || value === null || isNaN(value)) return '0%';
+        return `${(value * 100).toFixed(decimals)}%`;
+    }
+    
+    escapeHtml(text) {
+        if (text === undefined || text === null) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    showSummaryModal(summary) {
+        const modal = document.getElementById('summary-modal');
+        const content = document.getElementById('summary-content');
+        
+        if (!modal || !content) {
+            console.error('Summary modal elements not found');
+            return;
+        }
+
+        let html = '';
+
+        // Meta information
+        html += `<div class="summary-section">
+            <h3>📊 Tournament Meta</h3>
+            <div class="meta-grid">
+                <div class="meta-item"><strong>Tournament ID:</strong> ${this.escapeHtml(summary.tournament_id || 'N/A')}</div>
+                <div class="meta-item"><strong>Tournaments:</strong> ${summary.tournaments_played || 3}</div>
+                <div class="meta-item"><strong>Hands/Tournament:</strong> ${summary.hands_per_tournament || 10}</div>
+                <div class="meta-item"><strong>Learning Enabled:</strong> ${summary.learning_enabled ? '✅ Yes' : '❌ No'}</div>
+            </div>
+        </div>`;
+
+        // Agent statistics
+        if (summary.agents && summary.agents.length > 0) {
+            html += `<div class="summary-section">
+                <h3>🤖 Agent Performance</h3>
+                <div class="agents-grid">`;
+            
+            summary.agents.forEach(agent => {
+                const metrics = agent.metrics || {};
+                html += `<div class="agent-card">
+                    <div class="agent-card-header">
+                        <h4>${this.escapeHtml(agent.name)}</h4>
+                        <span class="agent-type-badge">${this.escapeHtml(agent.type)}</span>
+                    </div>
+                    <div class="agent-stats">
+                        <div class="stat-row"><strong>Win Rate:</strong> ${this.formatPercentage(agent.win_rate)}</div>
+                        <div class="stat-row"><strong>Net Chips:</strong> ${agent.net_chips > 0 ? '+' : ''}${agent.net_chips}</div>
+                        <div class="stat-row"><strong>Performance Score:</strong> ${agent.performance_score}/100</div>
+                        <div class="stat-row"><strong>Wins:</strong> ${agent.wins || 0} / ${agent.games_played || 0}</div>
+                        <div class="stat-row"><strong>Hands Won:</strong> ${agent.hands_won || 0} / ${agent.total_hands || 0}</div>
+                        ${metrics.aggression_factor ? `<div class="stat-row"><strong>Aggression Factor:</strong> ${metrics.aggression_factor}</div>` : ''}
+                        ${metrics.vpip ? `<div class="stat-row"><strong>VPIP:</strong> ${metrics.vpip}%</div>` : ''}
+                        ${metrics.pfr ? `<div class="stat-row"><strong>PFR:</strong> ${metrics.pfr}%</div>` : ''}
+                        ${metrics.fold_to_3bet ? `<div class="stat-row"><strong>Fold to 3-Bet:</strong> ${metrics.fold_to_3bet}%</div>` : ''}
+                    </div>
+                    ${agent.learning_notes && agent.learning_notes.length > 0 ? `
+                        <div class="learning-notes">
+                            <strong>📚 Learning Notes:</strong>
+                            <ul>${agent.learning_notes.map(note => `<li>${this.escapeHtml(note)}</li>`).join('')}</ul>
+                        </div>
+                    ` : ''}
+                </div>`;
+            });
+            
+            html += `</div></div>`;
+        }
+
+        // Assessment criteria
+        if (summary.assessment_criteria) {
+            html += `<div class="summary-section">
+                <h3>🧭 Assessment Criteria</h3>
+                <ul class="criteria-list">`;
+            summary.assessment_criteria.forEach(criterion => {
+                html += `<li>${this.escapeHtml(criterion)}</li>`;
+            });
+            html += `</ul></div>`;
+        }
+
+        // Evaluation examples
+        if (summary.evaluation_examples && summary.evaluation_examples.length > 0) {
+            html += `<div class="summary-section">
+                <h3>📊 Evaluation Examples</h3>`;
+            summary.evaluation_examples.forEach((example, idx) => {
+                html += `<div class="example-card">
+                    <h4>Example ${idx + 1}: ${this.escapeHtml(example.scenario)}</h4>
+                    <p><strong>Agent:</strong> ${this.escapeHtml(example.agent_type || 'N/A')}</p>
+                    <p><strong>Response:</strong> ${this.escapeHtml(example.agent_response?.action || 'N/A')} ${example.agent_response?.amount ? `(${example.agent_response.amount})` : ''}</p>
+                    <p><strong>Reasoning:</strong> ${this.escapeHtml(example.agent_response?.reasoning || 'N/A')}</p>`;
+                if (example.assessments && example.assessments.length > 0) {
+                    html += `<div class="scores-grid">`;
+                    example.assessments.forEach(assess => {
+                        html += `<div class="score-item">
+                            <span class="score-label">${this.escapeHtml(assess.dimension)}:</span>
+                            <span class="score-value">${(assess.score * 100).toFixed(0)}%</span>
+                        </div>`;
+                    });
+                    html += `</div>`;
+                }
+                html += `<p><strong>Overall Score:</strong> ${(example.overall_score * 100).toFixed(0)}%</p></div>`;
+            });
+            html += `</div>`;
+        }
+
+        // Benchmark results
+        if (summary.benchmark && summary.benchmark.length > 0) {
+            html += `<div class="summary-section">
+                <h3>✅ Benchmark Reliability</h3>`;
+            summary.benchmark.forEach(bench => {
+                html += `<div class="benchmark-card">
+                    <h4>${this.escapeHtml(bench.agent_name)}</h4>
+                    <div class="benchmark-stats">
+                        <div class="stat-row"><strong>Action Accuracy:</strong> ${this.formatPercentage(bench.accuracy)}</div>
+                        <div class="stat-row"><strong>Average Score:</strong> ${bench.average_score.toFixed(2)}/1.00</div>
+                        <div class="stat-row"><strong>Status:</strong> ${(bench.pass || bench.passed) ? '✅ PASS' : '❌ FAIL'}</div>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
+        }
+
+        content.innerHTML = html;
+        modal.style.display = 'flex';
+        
+        // Setup close button
+        const closeBtn = document.getElementById('close-summary');
+        if (closeBtn) {
+            closeBtn.onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        // Setup new tournament button
+        const newTournamentBtn = document.getElementById('start-new-tournament');
+        if (newTournamentBtn) {
+            newTournamentBtn.onclick = () => {
+                modal.style.display = 'none';
+                // Send message to backend to start new tournament
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({type: 'start_new_tournament'}));
+                }
+            };
+        }
+    }
+
+    handleTournamentStart(data) {
+        this.currentTournament = data.tournament_id || '1';
+        this.currentRound = 0;
+        this.totalHands = 0;
+        this.updateTournamentProgress();
+        this.addLogEntry(`Tournament ${this.currentTournament} started`, 'info');
+    }
+
+    updateTournamentProgress() {
+        const tournamentEl = document.getElementById('current-tournament');
+        const roundEl = document.getElementById('current-round-num');
+        const handsEl = document.getElementById('total-hands');
+        
+        if (tournamentEl) tournamentEl.textContent = this.currentTournament || '-';
+        if (roundEl) roundEl.textContent = this.currentRound || '-';
+        if (handsEl) handsEl.textContent = this.totalHands || '-';
     }
 }
 

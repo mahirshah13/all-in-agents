@@ -187,13 +187,14 @@ async def get_selected_agents():
     """Get currently selected agents"""
     global selected_agents_for_tournament
     if not selected_agents_for_tournament:
-        # Return default if none selected
+        # Return default if none selected (5 agents)
         return {
             "agents": [
                 {"id": "tagbot", "name": "TAGBot", "description": "Tight-Aggressive"},
                 {"id": "montecarlo", "name": "Monte Carlo", "description": "Simulation-Based"},
                 {"id": "maniac", "name": "Maniac", "description": "Ultra-Aggressive"},
-                {"id": "smart_agent", "name": "Smart Agent", "description": "Pot Odds & Position"}
+                {"id": "smart_agent", "name": "Smart Agent", "description": "Pot Odds & Position"},
+                {"id": "adaptive", "name": "Adaptive Heuristic", "description": "Stack-Aware Adaptive"}
             ]
         }
     return {"agents": selected_agents_for_tournament}
@@ -206,8 +207,8 @@ async def select_agents(selection: AgentSelection):
     """Receive selected agents and store for tournament"""
     global selected_agents_for_tournament
     selected = selection.agents
-    if len(selected) != 4:
-        return {"success": False, "error": "Must select exactly 4 agents"}
+    if len(selected) != 5:
+        return {"success": False, "error": "Must select exactly 5 agents"}
     
     # Map agent IDs to full agent info with URLs
     all_agents = {

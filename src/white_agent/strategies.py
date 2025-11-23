@@ -15,9 +15,61 @@ class PokerStrategy:
 class TAGBotStrategy(PokerStrategy):
     """Tight-Aggressive Rule-Based Agent - plays conservatively pre-flop, aggressively post-flop when strong"""
     
-    def _evaluate_hand_strength(self, player_cards: list, community_cards: list) -> float:
-        """Evaluate hand strength with position-adjusted preflop ranges"""
-        if not player_cards:
+    def _evaluate_preflop_strength(self, player_cards: list) -> float:
+        """Evaluate preflop hand strength (TAGBot should be very tight)"""
+        if not player_cards or len(player_cards) < 2:
+            return 0.0
+        
+        ranks = []
+        for card_str in player_cards:
+            rank_char = card_str[0]
+            if rank_char == 'A':
+                ranks.append(14)
+            elif rank_char == 'K':
+                ranks.append(13)
+            elif rank_char == 'Q':
+                ranks.append(12)
+            elif rank_char == 'J':
+                ranks.append(11)
+            else:
+                ranks.append(int(rank_char))
+        
+        max_rank = max(ranks)
+        min_rank = min(ranks)
+        is_pair = len(set(ranks)) == 1
+        suited = len(set([c[1] if len(c) > 1 else c[-1] for c in player_cards])) == 1
+        
+        # TAGBot preflop: Only premium hands get high strength
+        if is_pair:
+            # Pocket pairs: AA-99 are strong, 88-22 are weaker
+            if max_rank >= 13:  # AA, KK
+                return 0.9
+            elif max_rank >= 11:  # QQ, JJ
+                return 0.8
+            elif max_rank >= 9:  # TT, 99
+                return 0.7
+            else:  # 88-22
+                return 0.4
+        elif max_rank == 14:  # Ace high
+            if min_rank >= 10:  # AK, AQ, AJ, AT
+                return 0.75 if suited else 0.7
+            elif min_rank >= 8:  # A9-A8
+                return 0.5 if suited else 0.4
+            else:
+                return 0.3 if suited else 0.2
+        elif max_rank == 13:  # King high
+            if min_rank >= 10:  # KQ, KJ, KT
+                return 0.6 if suited else 0.5
+            else:
+                return 0.3 if suited else 0.2
+        elif max_rank >= 11 and min_rank >= 10:  # QJ, QT, JT
+            return 0.4 if suited else 0.3
+        else:
+            return 0.1  # Weak hands
+    
+    def _evaluate_postflop_strength(self, player_cards: list, community_cards: list) -> float:
+        """Evaluate postflop hand strength"""
+        if not player_cards or not community_cards:
             return 0.0
         
         all_cards = player_cards + community_cards
@@ -43,7 +95,7 @@ class TAGBotStrategy(PokerStrategy):
         
         strength = 0.0
         if counts[0] >= 2:  # Pair
-            strength = 0.5
+            strength = 0.4
         if counts[0] >= 3:  # Three of a kind
             strength = 0.75
         if counts[0] >= 4:  # Four of a kind
@@ -66,26 +118,46 @@ class TAGBotStrategy(PokerStrategy):
         pot_size = game_data.get("pot_size", 0)
         round_name = game_data.get("game_state", {}).get("round", "preflop")
         player_position = game_data.get("player_position", 0)
+        amount_to_call = current_bet - game_data.get("your_current_bet", 0)
         
-        hand_strength = self._evaluate_hand_strength(player_cards, community_cards)
         is_preflop = round_name == "preflop"
         
-        # Preflop: Tight ranges (position-adjusted)
+        # Preflop: Tight-Aggressive - fold most hands, raise with premiums
         if is_preflop:
-            # Position adjustment: later position = wider range
-            position_bonus = (4 - player_position) * 0.1  # Later position = more aggressive
+            hand_strength = self._evaluate_preflop_strength(player_cards)
+            
+            # Position adjustment: later position = slightly wider range
+            position_bonus = (4 - player_position) * 0.05  # Smaller bonus for TAGBot
             adjusted_strength = hand_strength + position_bonus
             
-            # Tight preflop: only play strong hands
-            if adjusted_strength < 0.5:
-                return {
-                    "action": "fold",
-                    "amount": 0,
-                    "confidence": 0.8,
-                    "reasoning": "Tight preflop: folding weak hand"
-                }
-            elif adjusted_strength < 0.7:
-                if current_bet > pot_size * 0.25:
+            # TAGBot: Very tight preflop - fold ~75-80% of hands
+            if adjusted_strength < 0.6:
+                # Fold weak/marginal hands, especially to raises
+                if current_bet > 0:  # Facing a bet/raise
+                    return {
+                        "action": "fold",
+                        "amount": 0,
+                        "confidence": 0.85,
+                        "reasoning": "Tight preflop: folding weak hand to bet"
+                    }
+                else:  # Can check or limp
+                    if adjusted_strength < 0.4:
+                        return {
+                            "action": "fold",
+                            "amount": 0,
+                            "confidence": 0.8,
+                            "reasoning": "Tight preflop: folding weak hand"
+                        }
+                    else:
+                        return {
+                            "action": "call",
+                            "amount": min(current_bet, player_chips),
+                            "confidence": 0.6,
+                            "reasoning": "Tight preflop: limping with marginal hand"
+                        }
+            elif adjusted_strength < 0.75:
+                # Moderate hands - call small bets, fold to raises
+                if current_bet > pot_size * 0.3 or amount_to_call > player_chips * 0.1:
                     return {
                         "action": "fold",
                         "amount": 0,
@@ -95,51 +167,82 @@ class TAGBotStrategy(PokerStrategy):
                 else:
                     return {
                         "action": "call",
-                        "amount": min(current_bet, player_chips),
-                        "confidence": 0.6,
+                        "amount": min(amount_to_call, player_chips),
+                        "confidence": 0.65,
                         "reasoning": "Tight preflop: calling with moderate hand"
                     }
-            else:  # Strong preflop hand
-                raise_amount = int(current_bet * 2) if current_bet > 0 else 80
+            else:  # Strong preflop hand (premium)
+                # TAGBot: Aggressive with strong hands
+                raise_amount = int(current_bet * 2.5) if current_bet > 0 else 80
+                max_affordable = player_chips + amount_to_call
+                raise_to = min(raise_amount, max_affordable)
                 return {
                     "action": "raise",
-                    "amount": min(raise_amount, player_chips),
-                    "confidence": 0.85,
-                    "reasoning": "Tight preflop: raising with strong hand"
+                    "amount": raise_to,
+                    "confidence": 0.9,
+                    "reasoning": "Tight preflop: raising with premium hand"
                 }
         else:
-            # Post-flop: Aggressive when strong (C-bet with equity threshold)
-            if hand_strength < 0.4:
-                # Weak post-flop - fold unless pot odds are good
-                pot_odds = current_bet / (pot_size + current_bet) if (pot_size + current_bet) > 0 else 0
-                if pot_odds < 0.2:
+            # Post-flop: Aggressive when strong, fold when weak
+            hand_strength = self._evaluate_postflop_strength(player_cards, community_cards)
+            
+            # Check if we hit the board
+            if hand_strength < 0.3:
+                # Weak post-flop - TAGBot folds most weak hands
+                pot_odds = amount_to_call / (pot_size + amount_to_call) if (pot_size + amount_to_call) > 0 else 0
+                # Only call with very good pot odds
+                if pot_odds < 0.15 and amount_to_call < player_chips * 0.05:
                     return {
                         "action": "call",
-                        "amount": min(current_bet, player_chips),
-                        "confidence": 0.5,
-                        "reasoning": "Post-flop: calling with pot odds"
+                        "amount": min(amount_to_call, player_chips),
+                        "confidence": 0.4,
+                        "reasoning": "Post-flop: calling with excellent pot odds"
                     }
                 else:
                     return {
                         "action": "fold",
                         "amount": 0,
-                        "confidence": 0.7,
-                        "reasoning": "Post-flop: folding weak hand"
+                        "confidence": 0.8,
+                        "reasoning": "Post-flop: folding weak hand (TAGBot tight)"
                     }
-            elif hand_strength < 0.7:
-                # Moderate strength - C-bet or value bet
-                raise_amount = int(current_bet * 1.8) if current_bet > 0 else 100
-                return {
-                    "action": "raise",
-                    "amount": min(raise_amount, player_chips),
-                    "confidence": 0.75,
-                    "reasoning": "Post-flop: C-betting with equity"
-                }
+            elif hand_strength < 0.6:
+                # Moderate strength - check/call, don't bet into aggression
+                if current_bet > 0:
+                    # Facing a bet - call if pot odds are decent
+                    pot_odds = amount_to_call / (pot_size + amount_to_call) if (pot_size + amount_to_call) > 0 else 0
+                    if pot_odds < 0.25:
+                        return {
+                            "action": "call",
+                            "amount": min(amount_to_call, player_chips),
+                            "confidence": 0.6,
+                            "reasoning": "Post-flop: calling with moderate hand and decent pot odds"
+                        }
+                    else:
+                        return {
+                            "action": "fold",
+                            "amount": 0,
+                            "confidence": 0.7,
+                            "reasoning": "Post-flop: folding moderate hand to large bet"
+                        }
+                else:
+                    # No bet - TAGBot can value bet
+                    raise_amount = int(current_bet * 1.5) if current_bet > 0 else 60
+                    max_affordable = player_chips + amount_to_call
+                    raise_to = min(raise_amount, max_affordable)
+                    return {
+                        "action": "raise",
+                        "amount": raise_to,
+                        "confidence": 0.7,
+                        "reasoning": "Post-flop: value betting with moderate hand"
+                    }
             else:  # Very strong post-flop
-                raise_amount = int(current_bet * 2.5) if current_bet > 0 else 150
+                # TAGBot: Aggressive with strong hands
+                raise_amount = int(current_bet * 2.5) if current_bet > 0 else 100
+                max_affordable = player_chips + amount_to_call
+                raise_to = min(raise_amount, max_affordable)
                 return {
                     "action": "raise",
-                    "amount": min(raise_amount, player_chips),
+                    "amount": raise_to,
                     "confidence": 0.9,
                     "reasoning": "Post-flop: aggressive value bet with strong hand"
                 }
@@ -536,13 +639,17 @@ class SmartStrategy(PokerStrategy):
         # Adjusted strength considering position
         adjusted_strength = hand_strength * position_factor
         
+        # Calculate amount needed to call
+        amount_to_call = current_bet - game_data.get("your_current_bet", 0)
+        max_affordable_raise = player_chips + amount_to_call
+        
         # Decision logic
         if adjusted_strength < 0.3:
             # Weak hand - fold unless pot odds are very good
             if pot_odds < 0.15 and current_bet < pot_size * 0.2:
                 return {
                     "action": "call",
-                    "amount": min(current_bet, player_chips),
+                    "amount": min(amount_to_call, player_chips),
                     "confidence": 0.5,
                     "reasoning": "Weak hand but good pot odds"
                 }
@@ -556,25 +663,77 @@ class SmartStrategy(PokerStrategy):
         elif adjusted_strength < 0.6:
             # Moderate hand - call or small raise
             if pot_odds < 0.3:
-                raise_amount = int(current_bet * 1.5) if current_bet > 0 else 60
+                # Calculate raise TO amount (total bet)
+                raise_to = int(current_bet * 1.5) if current_bet > 0 else 60
+                # Cap to what player can afford
+                raise_to = min(raise_to, max_affordable_raise)
+                
+                # If player can't afford a meaningful raise, just call or fold
+                if raise_to <= current_bet or raise_to - current_bet < 20:
+                    if adjusted_strength > 0.4:
+                        return {
+                            "action": "call",
+                            "amount": min(amount_to_call, player_chips),
+                            "confidence": 0.6,
+                            "reasoning": "Moderate hand, can't afford meaningful raise"
+                        }
+                    else:
+                        return {
+                            "action": "fold",
+                            "amount": 0,
+                            "confidence": 0.6,
+                            "reasoning": "Moderate hand, not worth calling large bet"
+                        }
+                
                 return {
                     "action": "raise",
-                    "amount": min(raise_amount, player_chips),
+                    "amount": raise_to,
                     "confidence": 0.65,
                     "reasoning": "Moderate hand, good position/pot odds"
                 }
             else:
                 return {
                     "action": "call",
-                    "amount": min(current_bet, player_chips),
+                    "amount": min(amount_to_call, player_chips),
                     "confidence": 0.6,
                     "reasoning": "Moderate hand, calling"
                 }
         else:  # Strong hand
-            raise_amount = int(current_bet * 2) if current_bet > 0 else 100
+            # Calculate raise TO amount (total bet)
+            raise_to = int(current_bet * 2) if current_bet > 0 else 100
+            # Cap to what player can afford
+            raise_to = min(raise_to, max_affordable_raise)
+            
+            # If player is very short-stacked, consider all-in or call
+            if player_chips < amount_to_call * 2:
+                # Very short stack - all-in or call
+                if adjusted_strength > 0.5:
+                    return {
+                        "action": "all_in",
+                        "amount": player_chips,
+                        "confidence": 0.8,
+                        "reasoning": "Strong hand, short stack - going all-in"
+                    }
+                else:
+                    return {
+                        "action": "call",
+                        "amount": min(amount_to_call, player_chips),
+                        "confidence": 0.7,
+                        "reasoning": "Strong hand but short stack, calling"
+                    }
+            
+            # If player can't afford a meaningful raise, just call
+            if raise_to <= current_bet or raise_to - current_bet < 20:
+                return {
+                    "action": "call",
+                    "amount": min(amount_to_call, player_chips),
+                    "confidence": 0.75,
+                    "reasoning": "Strong hand, can't afford meaningful raise"
+                }
+            
             return {
                 "action": "raise",
-                "amount": min(raise_amount, player_chips),
+                "amount": raise_to,
                 "confidence": 0.85,
                 "reasoning": "Strong hand, raising for value"
             }
@@ -649,13 +808,19 @@ class EquityCalculatorStrategy(PokerStrategy):
         elif counts[0] >= 3 and counts[1] >= 2:
             equity = 0.90
         elif counts[0] >= 3:
-            equity = 0.75
+            equity = 0.70  # Lower - trips aren't always strong
         elif counts[0] >= 2 and counts[1] >= 2:
-            equity = 0.65
+            equity = 0.60  # Lower - two pair can be vulnerable
         elif counts[0] >= 2:
-            equity = 0.50
+            # Pair - check if it's top pair or bottom pair
+            pair_rank = max([r for r, c in rank_counts.items() if c >= 2])
+            board_ranks = [r for card_str in community_cards for r in ([14 if card_str[0]=='A' else 13 if card_str[0]=='K' else 12 if card_str[0]=='Q' else 11 if card_str[0]=='J' else int(card_str[0])])]
+            if board_ranks and pair_rank >= max(board_ranks):
+                equity = 0.45  # Top pair
+            else:
+                equity = 0.25  # Bottom pair or underpair
         else:
-            equity = 0.30
+            equity = 0.15  # Much lower for high card - most hands should fold
         
         return equity
     
@@ -676,26 +841,30 @@ class EquityCalculatorStrategy(PokerStrategy):
         # Calculate pot odds
         pot_odds = current_bet / (pot_size + current_bet) if (pot_size + current_bet) > 0 else 0
         
-        # Decision based on equity vs pot odds
-        if equity < pot_odds * 0.8:  # Not enough equity
+        # Decision based on equity vs pot odds - be more conservative
+        amount_to_call = current_bet - game_data.get("your_current_bet", 0)
+        
+        if equity < pot_odds * 1.1:  # Need equity to be better than pot odds (more conservative)
             return {
                 "action": "fold",
                 "amount": 0,
-                "confidence": 0.8,
+                "confidence": 0.85,
                 "reasoning": f"Equity ({equity:.1%}) < Pot Odds ({pot_odds:.1%}), folding"
             }
-        elif equity > pot_odds * 1.2:  # Good equity, raise for value
+        elif equity > pot_odds * 1.5 and equity > 0.5:  # Good equity, raise for value
             raise_amount = int(current_bet * 2) if current_bet > 0 else 100
+            max_affordable = player_chips + amount_to_call
+            raise_to = min(raise_amount + game_data.get("your_current_bet", 0), max_affordable)
             return {
                 "action": "raise",
-                "amount": min(raise_amount, player_chips),
+                "amount": raise_to,
                 "confidence": 0.85,
                 "reasoning": f"Strong equity ({equity:.1%}), raising for value"
             }
-        else:  # Call
+        else:  # Call if equity justifies it
             return {
                 "action": "call",
-                "amount": min(current_bet, player_chips),
+                "amount": min(amount_to_call, player_chips),
                 "confidence": 0.7,
                 "reasoning": f"Equity ({equity:.1%}) justifies call"
             }
@@ -771,47 +940,80 @@ class AdaptiveHeuristicStrategy(PokerStrategy):
         # Adjust based on pot size relative to stack
         pot_ratio = pot_size / player_chips if player_chips > 0 else 0
         
-        # Decision logic with adaptations
-        if hand_strength < 0.3:
-            # Weak hand
+        # Decision logic with adaptations - be more conservative
+        amount_to_call = current_bet - game_data.get("your_current_bet", 0)
+        
+        if hand_strength < 0.4:  # More conservative threshold
+            # Weak hand - fold most of the time
+            pot_odds = amount_to_call / (pot_size + amount_to_call) if (pot_size + amount_to_call) > 0 else 0
             if pot_ratio > 0.3 and stack_ratio < 0.7:  # Big pot, short stack
                 return {
                     "action": "fold",
                     "amount": 0,
-                    "confidence": 0.7,
+                    "confidence": 0.8,
                     "reasoning": "Weak hand, preserving short stack"
+                }
+            elif pot_odds < 0.1 and amount_to_call < player_chips * 0.05:  # Very cheap
+                return {
+                    "action": "call",
+                    "amount": min(amount_to_call, player_chips),
+                    "confidence": 0.5,
+                    "reasoning": "Weak hand but very cheap call"
                 }
             else:
                 return {
                     "action": "fold",
                     "amount": 0,
-                    "confidence": 0.8,
+                    "confidence": 0.85,
                     "reasoning": "Weak hand, folding"
                 }
-        elif hand_strength < 0.6:
+        elif hand_strength < 0.65:  # More conservative threshold
             # Moderate hand
             if stack_ratio < 0.5:  # Short stack - push or fold
-                if hand_strength > 0.45:
+                if hand_strength > 0.5:  # Need stronger hand to push
+                    max_affordable = player_chips + amount_to_call
                     return {
-                        "action": "raise",
-                        "amount": min(player_chips, current_bet * 3),
+                        "action": "all_in",
+                        "amount": player_chips,
                         "confidence": 0.6,
-                        "reasoning": "Short stack, pushing with moderate hand"
+                        "reasoning": "Short stack, pushing with decent hand"
                     }
                 else:
                     return {
                         "action": "fold",
                         "amount": 0,
-                        "confidence": 0.6,
+                        "confidence": 0.7,
                         "reasoning": "Short stack, folding moderate hand"
                     }
             else:
-                return {
-                    "action": "call",
-                    "amount": min(current_bet, player_chips),
-                    "confidence": 0.65,
-                    "reasoning": "Moderate hand, calling"
-                }
+                # Facing a bet - be more conservative
+                if current_bet > 0:
+                    pot_odds = amount_to_call / (pot_size + amount_to_call) if (pot_size + amount_to_call) > 0 else 0
+                    if pot_odds < 0.2:
+                        return {
+                            "action": "call",
+                            "amount": min(amount_to_call, player_chips),
+                            "confidence": 0.65,
+                            "reasoning": "Moderate hand, calling with good pot odds"
+                        }
+                    else:
+                        return {
+                            "action": "fold",
+                            "amount": 0,
+                            "confidence": 0.7,
+                            "reasoning": "Moderate hand, bet too expensive"
+                        }
+                else:
+                    # No bet - can value bet
+                    raise_amount = int(current_bet * 1.5) if current_bet > 0 else 60
+                    max_affordable = player_chips + amount_to_call
+                    raise_to = min(raise_amount + game_data.get("your_current_bet", 0), max_affordable)
+                    return {
+                        "action": "raise",
+                        "amount": raise_to,
+                        "confidence": 0.7,
+                        "reasoning": "Moderate hand, value betting"
+                    }
         else:  # Strong hand
             raise_amount = int(current_bet * (2 * self.adjustment_factor)) if current_bet > 0 else int(100 * self.adjustment_factor)
             return {
