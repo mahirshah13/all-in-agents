@@ -23,6 +23,7 @@ from a2a.server.events import EventQueue
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
+from starlette.responses import PlainTextResponse
 import uvicorn
 
 from poker_engine import PokerEngine, Action, GameState
@@ -31,6 +32,38 @@ from src.green_agent.evaluation_examples import (
     EvaluationExamples, EvaluationExample, AssessmentDimension,
     get_ground_truth_test_cases
 )
+
+
+def _prepare_green_agent_card(url: str, agent_config: Dict[str, Any]) -> types.AgentCard:
+    """Build the green poker assessment manager agent card matching white card schema."""
+    evaluation_skill = types.AgentSkill(
+        id="poker_evaluation",
+        name="Poker Evaluation",
+        description="Evaluate poker-playing agents",
+        tags=["poker", "evaluation", "assessment"],
+        examples=[],
+    )
+    tournament_skill = types.AgentSkill(
+        id="tournament_management",
+        name="Tournament Management",
+        description="Manage poker tournaments between agents",
+        tags=["poker", "tournament", "management"],
+        examples=[],
+    )
+
+    # Agentbeats needs the public controller URL (Cloudflare) rather than http://localhost:8000.
+    public_url = os.getenv("GREEN_AGENT_PUBLIC_URL") or url
+
+    return types.AgentCard(
+        name=agent_config["name"],
+        description=agent_config["description"],
+        version=agent_config["version"],
+        url=public_url,
+        default_input_modes=["text/plain"],
+        default_output_modes=["text/plain"],
+        capabilities=types.AgentCapabilities(),
+        skills=[evaluation_skill, tournament_skill],
+    )
 
 # Import frontend server for broadcasting (optional, won't break if not available)
 try:
@@ -352,6 +385,44 @@ class PokerAssessmentManager(AgentExecutor):
         self.logger.info("Cancelling active evaluations...")
         self.active_games.clear()
         self.evaluation_results.clear()
+
+    async def start_a2a_server(self):
+        """Start the A2A server for external communication"""
+        agent_card = _prepare_green_agent_card(
+            url=self.config["communication"]["endpoint"],
+            agent_config=self.agent_config,
+        )
+        
+        # Create request handler with executor and task store
+        request_handler = DefaultRequestHandler(
+            agent_executor=self,
+            task_store=InMemoryTaskStore(),
+        )
+        
+        # Create A2A application
+        app = A2AStarletteApplication(
+            agent_card=agent_card,
+            http_handler=request_handler,
+        )
+        starlette_app = app.build()
+
+        async def healthcheck(request):
+            return PlainTextResponse("OK")
+
+        starlette_app.router.add_route("/", healthcheck, methods=["GET"])
+        
+        # Start server
+        port = int(self.config["communication"]["endpoint"].split(":")[-1])
+        server_config = uvicorn.Config(
+            app=starlette_app,
+            host="0.0.0.0",
+            port=port,
+            log_level="info"
+        )
+        server = uvicorn.Server(server_config)
+        
+        # Start server
+        await server.serve()
 
     def print_status(self, message: str, status: str = "INFO"):
         """Print status message with tau-bench style formatting"""
@@ -2208,39 +2279,9 @@ async def start_green_agent():
     assessment_manager = PokerAssessmentManager(config)
     
     # Create agent card
-    agent_card = types.AgentCard(
-        name=config["agent"]["name"],
-        description=config["agent"]["description"],
-        version=config["agent"]["version"],
+    agent_card = _prepare_green_agent_card(
         url=config["communication"]["endpoint"],
-        capabilities=types.AgentCapabilities(
-            evaluation=True,
-            agent_management=True,
-            game_coordination=True,
-            metrics_collection=True,
-            tournament_management=True
-        ),
-        skills=[
-            types.AgentSkill(
-                id="poker_evaluation",
-                name="poker_evaluation",
-                description="Evaluate poker-playing agents",
-                input_schema={"type": "object"},
-                output_schema={"type": "object"},
-                tags=["poker", "evaluation", "assessment"]
-            ),
-            types.AgentSkill(
-                id="tournament_management",
-                name="tournament_management",
-                description="Manage poker tournaments between agents",
-                input_schema={"type": "object"},
-                output_schema={"type": "object"},
-                tags=["poker", "tournament", "management"]
-            )
-        ],
-        transports=["http"],
-        default_input_modes=["text"],
-        default_output_modes=["text"]
+        agent_config=config["agent"],
     )
     
     # Create request handler with executor and task store
@@ -2254,6 +2295,12 @@ async def start_green_agent():
         agent_card=agent_card,
         http_handler=request_handler,
     )
+    starlette_app = app.build()
+
+    async def healthcheck(request):
+        return PlainTextResponse("OK")
+
+    starlette_app.router.add_route("/", healthcheck, methods=["GET"])
     
     try:
         # Start the A2A server and run evaluation
@@ -2265,7 +2312,7 @@ async def start_green_agent():
         # Start server
         port = int(config["communication"]["endpoint"].split(":")[-1])
         server_config = uvicorn.Config(
-            app=app,
+            app=starlette_app,
             host="0.0.0.0",
             port=port,
             log_level="info"
