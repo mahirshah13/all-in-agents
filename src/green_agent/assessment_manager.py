@@ -409,7 +409,11 @@ class PokerAssessmentManager(AgentExecutor):
         async def healthcheck(request):
             return PlainTextResponse("OK")
 
+        async def status(request):
+            return PlainTextResponse("OK")
+
         starlette_app.router.add_route("/", healthcheck, methods=["GET"])
+        starlette_app.router.add_route("/status", status, methods=["GET"])
         
         # Start server
         port = int(self.config["communication"]["endpoint"].split(":")[-1])
@@ -2300,7 +2304,11 @@ async def start_green_agent():
     async def healthcheck(request):
         return PlainTextResponse("OK")
 
+    async def status(request):
+        return PlainTextResponse("OK")
+
     starlette_app.router.add_route("/", healthcheck, methods=["GET"])
+    starlette_app.router.add_route("/status", status, methods=["GET"])
     
     try:
         # Start the A2A server and run evaluation
