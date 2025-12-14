@@ -17,36 +17,63 @@ dotenv.load_dotenv()
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from src.green_agent.assessment_manager import PokerAssessmentManager, start_green_agent
+from src.green_agent.assessment_manager import PokerAssessmentManager, start_green_agent, start_green_agent_sync
 from src.white_agent.poker_player import GeneralWhiteAgentExecutor, start_white_agent
 
 
-async def start_green_agent_only():
-    """Start only the green agent (assessment manager)"""
+class PokerAgentifySettings:
+    """Settings class similar to TaubenchSettings - reads from environment variables"""
+    def __init__(self):
+        self.role: str = os.getenv("ROLE", "unspecified")
+        self.host: str = os.getenv("HOST", "127.0.0.1")
+        self.agent_port: int = int(os.getenv("AGENT_PORT", "9000"))
+        self.agent_name: str = os.getenv("AGENT_NAME", "agent_card")
+
+
+async def start_green_agent_only(agent_name: str = None, host: str = None, port: int = None, run_evaluation: bool = False):
+    """
+    Start only the green agent (assessment manager) without running evaluation.
+    
+    Args:
+        agent_name: Name of the agent card file (without .toml extension)
+        host: Host to bind the server to
+        port: Port to bind the server to
+        run_evaluation: Whether to run evaluation (default: False for server-only mode)
+    """
     print("🟢 Starting Green Agent (Assessment Manager)...")
     print("=" * 50)
     
-    # Load configuration
-    config_path = "src/green_agent/agent_card.toml"
-    try:
-        import toml
-        with open(config_path, 'r') as f:
-            config = toml.load(f)
-    except Exception as e:
-        print(f"❌ Error loading config from {config_path}: {e}")
-        return
+    # Use provided values or load from config
+    if agent_name is None or host is None or port is None:
+        # Load configuration to get defaults
+        config_path = "src/green_agent/agent_card.toml"
+        try:
+            import toml
+            with open(config_path, 'r') as f:
+                config = toml.load(f)
+        except Exception as e:
+            print(f"❌ Error loading config from {config_path}: {e}")
+            return
+        
+        if agent_name is None:
+            agent_name = "agent_card"
+        if host is None:
+            # Extract host from endpoint or use default
+            endpoint = config.get("communication", {}).get("endpoint", "http://localhost:9000")
+            host = endpoint.split("://")[1].split(":")[0] if "://" in endpoint else "localhost"
+        if port is None:
+            # Extract port from endpoint or use default
+            endpoint = config.get("communication", {}).get("endpoint", "http://localhost:9000")
+            port = int(endpoint.split(":")[-1]) if ":" in endpoint else 9000
     
-    # Create assessment manager
-    assessment_manager = PokerAssessmentManager(config)
-    
     try:
-        # Start the A2A server
-        print(f"🚀 Starting A2A server on {config['communication']['endpoint']}")
+        # Start the A2A server using the new parameterized function
+        print(f"🚀 Starting A2A server on http://{host}:{port}")
         print("📡 Server will be available for A2A communication")
         print("🛑 Press Ctrl+C to stop the server")
         print("=" * 50)
         
-        await assessment_manager.start_a2a_server()
+        await start_green_agent(agent_name=agent_name, host=host, port=port, run_evaluation=run_evaluation)
     except KeyboardInterrupt:
         print("\n🛑 Server stopped by user")
     except Exception as e:
@@ -76,7 +103,7 @@ def start_white_agent_only(agent_id: str, port: int, agent_type: str = "openai")
 
 
 
-async def start_full_system():
+async def start_full_system(agent_name: str = None, host: str = None, port: int = None):
     """Start the complete evaluation system (green agent A2A server + evaluation)"""
     import subprocess
     import time
@@ -143,7 +170,14 @@ async def start_full_system():
         print("🔄 Starting green agent and evaluation...")
         
         # Start green agent (this will run the evaluation)
-        await start_green_agent()
+        # Use green_port to avoid conflict with white agent port variable
+        green_port = port if port is not None else 9000
+        await start_green_agent(
+            agent_name=agent_name or "agent_card",
+            host=host or "localhost",
+            port=green_port,
+            run_evaluation=True
+        )
         
     except KeyboardInterrupt:
         print("\n🛑 System stopped by user")
@@ -170,6 +204,28 @@ async def start_full_system():
                 frontend_process.kill()
 
 
+def run_from_env():
+    """
+    Run agent based on environment variables (similar to tau_bench's 'run' command).
+    Reads ROLE, HOST, AGENT_PORT, and AGENT_NAME from environment.
+    """
+    settings = PokerAgentifySettings()
+    if settings.role == "green":
+        start_green_agent_sync(
+            agent_name=settings.agent_name,
+            host=settings.host,
+            port=settings.agent_port,
+            run_evaluation=False  # Server-only mode when run from env
+        )
+    elif settings.role == "white":
+        # For white agent, we'd need agent_id from env or config
+        agent_id = os.getenv("AGENT_ID", "general_white_agent")
+        agent_type = os.getenv("AGENT_TYPE", "openai")
+        start_white_agent_only(agent_id, settings.agent_port, agent_type)
+    else:
+        raise ValueError(f"Unknown role: {settings.role}. Set ROLE environment variable to 'green' or 'white'")
+
+
 def main():
     """Main entry point with command line arguments"""
     parser = argparse.ArgumentParser(
@@ -179,8 +235,17 @@ def main():
 Examples:
   python launcher.py                    # Start complete evaluation system
   python launcher.py --green-only      # Start only green agent A2A server
+  python launcher.py --green-only --host 0.0.0.0 --port 9001  # Start green agent with custom host/port
   python launcher.py --white-only --agent-id random_1 --port 8001  # Start white agent
+  python launcher.py run                # Run based on environment variables (ROLE, HOST, AGENT_PORT)
         """
+    )
+    
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=["run"],
+        help="Command to run. 'run' reads from environment variables (ROLE, HOST, AGENT_PORT)"
     )
     
     parser.add_argument(
@@ -199,16 +264,30 @@ Examples:
         help="Agent ID for white agent (required with --white-only)"
     )
     parser.add_argument(
+        "--agent-name",
+        type=str,
+        help="Agent card name for green agent (without .toml extension, default: 'agent_card')"
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        help="Host to bind the server to (default: from config or 'localhost')"
+    )
+    parser.add_argument(
         "--port", 
         type=int, 
-        default=8001, 
-        help="Port for white agent (default: 8001)"
+        help="Port for the agent (default: from config or 9000 for green, 8001 for white)"
     )
     parser.add_argument(
         "--agent-type", 
         type=str, 
         default="openai", 
         help="Agent type: random, conservative, aggressive, smart, openai (default: openai)"
+    )
+    parser.add_argument(
+        "--no-evaluation",
+        action="store_true",
+        help="Don't run evaluation automatically (server-only mode for green agent)"
     )
     
     args = parser.parse_args()
@@ -220,17 +299,33 @@ Examples:
     )
     
     try:
-        if args.green_only:
-            asyncio.run(start_green_agent_only())
+        # Handle 'run' command (similar to tau_bench)
+        if args.command == "run":
+            run_from_env()
+        elif args.green_only:
+            asyncio.run(start_green_agent_only(
+                agent_name=args.agent_name,
+                host=args.host,
+                port=args.port,
+                run_evaluation=not args.no_evaluation
+            ))
         elif args.white_only:
             if not args.agent_id:
                 print("❌ Agent ID required for white agent launch")
                 print("Usage: python launcher.py --white-only --agent-id <agent_id> [--port <port>] [--agent-type <type>]")
                 sys.exit(1)
-            start_white_agent_only(args.agent_id, args.port, args.agent_type)
+            start_white_agent_only(
+                args.agent_id,
+                args.port or 8001,
+                args.agent_type
+            )
         else:
             # Default: start full system
-            asyncio.run(start_full_system())
+            asyncio.run(start_full_system(
+                agent_name=args.agent_name,
+                host=args.host,
+                port=args.port
+            ))
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
     except Exception as e:

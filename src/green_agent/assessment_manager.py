@@ -2261,8 +2261,16 @@ Good luck!"""
 
 
 
-async def start_green_agent():
-    """Standalone function to start the green agent A2A server and run evaluation"""
+async def start_green_agent(agent_name: str = "agent_card", host: str = "localhost", port: int = 9000, run_evaluation: bool = True):
+    """
+    Standalone function to start the green agent A2A server and optionally run evaluation.
+    
+    Args:
+        agent_name: Name of the agent card file (without .toml extension). Default: "agent_card"
+        host: Host to bind the server to. Default: "localhost"
+        port: Port to bind the server to. Default: 9000
+        run_evaluation: Whether to automatically start evaluation. Default: True
+    """
     print("🃏 Poker Agentify - A2A-based Poker Agent Evaluation")
     print("=" * 60)
     print("Green Agent: Assessment Manager (A2A Server)")
@@ -2271,7 +2279,7 @@ async def start_green_agent():
     print("=" * 60)
     
     # Load configuration
-    config_path = "src/green_agent/agent_card.toml"
+    config_path = f"src/green_agent/{agent_name}.toml"
     try:
         with open(config_path, 'r') as f:
             config = toml.load(f)
@@ -2279,12 +2287,18 @@ async def start_green_agent():
         print(f"❌ Error loading config from {config_path}: {e}")
         return
     
+    # Override endpoint with provided host/port if specified
+    endpoint_url = f"http://{host}:{port}"
+    if "communication" not in config:
+        config["communication"] = {}
+    config["communication"]["endpoint"] = endpoint_url
+    
     # Create assessment manager (executor)
     assessment_manager = PokerAssessmentManager(config)
     
     # Create agent card
     agent_card = _prepare_green_agent_card(
-        url=config["communication"]["endpoint"],
+        url=endpoint_url,
         agent_config=config["agent"],
     )
     
@@ -2311,24 +2325,25 @@ async def start_green_agent():
     starlette_app.router.add_route("/status", status, methods=["GET"])
     
     try:
-        # Start the A2A server and run evaluation
-        print(f"🚀 Starting A2A server on {config['communication']['endpoint']}")
+        # Start the A2A server and optionally run evaluation
+        print(f"🚀 Starting A2A server on {endpoint_url}")
         print("📡 Server will be available for A2A communication")
-        print("🔄 Starting evaluation task...")
+        if run_evaluation:
+            print("🔄 Starting evaluation task...")
         print("=" * 60)
         
         # Start server
-        port = int(config["communication"]["endpoint"].split(":")[-1])
         server_config = uvicorn.Config(
             app=starlette_app,
-            host="0.0.0.0",
+            host=host if host != "localhost" else "0.0.0.0",
             port=port,
             log_level="info"
         )
         server = uvicorn.Server(server_config)
         
-        # Run the A2A-based evaluation in background
-        evaluation_task = asyncio.create_task(assessment_manager._run_a2a_evaluation({"task_type": "evaluation"}))
+        # Run the A2A-based evaluation in background if requested
+        if run_evaluation:
+            evaluation_task = asyncio.create_task(assessment_manager._run_a2a_evaluation({"task_type": "evaluation"}))
         
         # Start server
         await server.serve()
@@ -2338,3 +2353,16 @@ async def start_green_agent():
     except Exception as e:
         print(f"❌ Error during evaluation: {e}")
         raise
+
+
+def start_green_agent_sync(agent_name: str = "agent_card", host: str = "localhost", port: int = 9000, run_evaluation: bool = True):
+    """
+    Synchronous wrapper for start_green_agent (similar to tau_bench interface).
+    
+    Args:
+        agent_name: Name of the agent card file (without .toml extension). Default: "agent_card"
+        host: Host to bind the server to. Default: "localhost"
+        port: Port to bind the server to. Default: 9000
+        run_evaluation: Whether to automatically start evaluation. Default: True
+    """
+    asyncio.run(start_green_agent(agent_name=agent_name, host=host, port=port, run_evaluation=run_evaluation))

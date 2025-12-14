@@ -14,7 +14,6 @@ tournament_management = true
 [communication]
 protocol = "a2a"
 endpoint = "http://localhost:9000"
-discovery_endpoint = "/.well-known/agent.json"
 
 [evaluation]
 # Number of hands (rounds) to play per tournament

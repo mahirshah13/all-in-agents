@@ -1,1 +1,1 @@
-python launcher.py --green-only
+python launcher.py run
