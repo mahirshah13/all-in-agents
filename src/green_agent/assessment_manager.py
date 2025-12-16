@@ -28,6 +28,7 @@ import uvicorn
 
 from poker_engine import PokerEngine, Action, GameState
 from src.my_util.my_a2a import get_agent_card, wait_agent_ready, send_message
+from src.my_util import parse_tags
 from src.green_agent.evaluation_examples import (
     EvaluationExamples, EvaluationExample, AssessmentDimension,
     get_ground_truth_test_cases
@@ -363,24 +364,94 @@ class PokerAssessmentManager(AgentExecutor):
         """
         Execute the assessment manager's main logic.
 
-        Note:
-            When used via the A2A HTTP server / Agentbeats controller, the
-            DefaultRequestHandler passes a RequestContext (not ServerCallContext),
-            so we must use the high-level context.get_user_input() API rather
-            than accessing context.request.message directly (which caused:
-            \"'RequestContext' object has no attribute 'request'\").
+        Supports three modes:
+        - Local / CLI mode: task data is JSON with a \"task_type\" field.
+        - Controller multi-agent mode (preferred): text prompt containing <white_agents> JSON.
+        - Controller single-agent tau-bench mode (<white_agent_url>) is explicitly rejected,
+          because this poker evaluation expects *two* white agents (montecarlo and maniac).
         """
         try:
             # Get the raw user input text from the context
             message_text = context.get_user_input()
 
-            # Parse as JSON if possible, otherwise fall back to a default
-            try:
-                task_data = json.loads(message_text)
-                task_type = task_data.get("task_type", "evaluation")
-            except json.JSONDecodeError:
+            # Controller-style tasks: look for tagged formats first
+            if "<white_agents>" in message_text and "</white_agents>" in message_text:
+                # Multi-agent JSON list inside <white_agents>...</white_agents>
+                tags = parse_tags(message_text)
+                white_agents_raw = tags.get("white_agents")
+                if not white_agents_raw:
+                    self.logger.error("Received controller task but <white_agents> tag is empty")
+                    return
+                try:
+                    white_agents_list = json.loads(white_agents_raw)
+                except json.JSONDecodeError:
+                    self.logger.error("Failed to parse <white_agents> JSON")
+                    return
+
+                if not isinstance(white_agents_list, list):
+                    self.logger.error("Parsed <white_agents> is not a list")
+                    return
+
+                if len(white_agents_list) != 2:
+                    self.logger.error(
+                        "Poker evaluation requires exactly two white agents (montecarlo and maniac); "
+                        f"received {len(white_agents_list)} definitions"
+                    )
+                    return
+
+                # Build white_agents set from the list
+                new_white_agents: Dict[str, WhiteAgentConfig] = {}
+                for idx, agent_def in enumerate(white_agents_list):
+                    try:
+                        # Default IDs/types if not provided: first = montecarlo, second = maniac
+                        default_id = "montecarlo" if idx == 0 else "maniac"
+                        aid = agent_def.get("id", default_id)
+                        aname = agent_def.get("name", aid)
+                        atype = agent_def.get("type", aid)
+                        aurl = agent_def["url"]
+                    except KeyError as e:
+                        self.logger.error(f"Invalid white agent definition, missing key: {e}")
+                        continue
+                    new_white_agents[aid] = WhiteAgentConfig(
+                        id=aid,
+                        name=aname,
+                        type=atype,
+                        url=aurl,
+                        config=agent_def.get("config", {}),
+                    )
+
+                if not new_white_agents:
+                    self.logger.error("No valid white agents parsed from <white_agents>")
+                    return
+
+                self.white_agents = new_white_agents
+                self.all_available_agents = dict(new_white_agents)
+
+                self.print_status(
+                    f"Configured {len(self.white_agents)} remote white agents from controller"
+                )
+
                 task_type = "evaluation"
                 task_data = {"task_type": "evaluation"}
+
+            elif "<white_agent_url>" in message_text and "</white_agent_url>" in message_text:
+                # Single-agent tau-bench style is not supported for poker evaluation.
+                # We require two white agents (montecarlo and maniac).
+                self.logger.error(
+                    "Received <white_agent_url> (single-agent) task, but poker evaluation "
+                    "requires exactly two white agents. Please send a <white_agents> JSON "
+                    "list with two agents (montecarlo and maniac)."
+                )
+                return
+
+            else:
+                # Local / JSON task mode: parse as JSON if possible
+                try:
+                    task_data = json.loads(message_text)
+                    task_type = task_data.get("task_type", "evaluation")
+                except json.JSONDecodeError:
+                    task_type = "evaluation"
+                    task_data = {"task_type": "evaluation"}
 
             if task_type == "evaluation":
                 await self._run_a2a_evaluation(task_data)

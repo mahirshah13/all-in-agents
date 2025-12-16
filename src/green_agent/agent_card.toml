@@ -1,15 +1,42 @@
+name = "poker_green_agent"
+description = "Green agent that coordinates poker evaluations and manages multiple white agents."
+version = "1.0.0"
+
+defaultInputModes = ["text"]
+defaultOutputModes = ["text"]
+
+[capabilities]
+streaming = false
+
+[[skills]]
+id = "host_poker_assessment"
+name = "Poker assessment hosting"
+description = """
+Host a poker evaluation between two white agents using A2A.
+This green agent expects exactly two white agents (montecarlo and maniac)
+to be provided via a <white_agents> JSON list in the task.
+"""
+tags = ["green agent", "assessment hosting", "poker"]
+examples = ["""
+Your task is to run a poker evaluation between two white agents.
+
+<white_agents>
+[
+  {
+    "url": "https://EXAMPLE_HOST/agents/MONTECARLO_ID"
+  },
+  {
+    "url": "https://EXAMPLE_HOST/agents/MANIAC_ID"
+  }
+]
+</white_agents>
+"""]
+
 [agent]
 name = "Poker Assessment Manager"
 description = "Green agent that coordinates poker evaluations and manages multiple white agents"
 version = "1.0.0"
 type = "assessment_manager"
-
-[capabilities]
-evaluation = true
-agent_management = true
-game_coordination = true
-metrics_collection = true
-tournament_management = true
 
 [communication]
 protocol = "a2a"
