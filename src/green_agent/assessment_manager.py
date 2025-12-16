@@ -17,8 +17,8 @@ from dataclasses import dataclass, asdict
 
 from a2a import types
 from a2a.client import ClientFactory, ClientConfig, A2ACardResolver, A2AClient
-from a2a.server.agent_execution import AgentExecutor
-from a2a.server.context import ServerCallContext
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.context import ServerCallContext  # Backwards-compat import (not used with RequestContext)
 from a2a.server.events import EventQueue
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -359,34 +359,40 @@ class PokerAssessmentManager(AgentExecutor):
         
         return poker_rules
 
-    async def execute(self, context: ServerCallContext, event_queue: EventQueue) -> None:
-        """Execute the assessment manager's main logic"""
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """
+        Execute the assessment manager's main logic.
+
+        Note:
+            When used via the A2A HTTP server / Agentbeats controller, the
+            DefaultRequestHandler passes a RequestContext (not ServerCallContext),
+            so we must use the high-level context.get_user_input() API rather
+            than accessing context.request.message directly (which caused:
+            \"'RequestContext' object has no attribute 'request'\").
+        """
         try:
-            # Parse the incoming message
-            message_text = ""
-            for part in context.request.message.parts:
-                if hasattr(part, 'text'):
-                    message_text += part.text
-            
-            # Parse as JSON if possible
+            # Get the raw user input text from the context
+            message_text = context.get_user_input()
+
+            # Parse as JSON if possible, otherwise fall back to a default
             try:
                 task_data = json.loads(message_text)
                 task_type = task_data.get("task_type", "evaluation")
             except json.JSONDecodeError:
                 task_type = "evaluation"
                 task_data = {"task_type": "evaluation"}
-            
+
             if task_type == "evaluation":
                 await self._run_a2a_evaluation(task_data)
             elif task_type == "tournament":
                 await self._run_a2a_tournament(task_data)
             else:
                 self.logger.error(f"Unknown task type: {task_type}")
-                
+
         except Exception as e:
             self.logger.error(f"Error in assessment manager execution: {e}")
 
-    async def cancel(self, context: ServerCallContext, event_queue: EventQueue) -> None:
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel any active evaluations"""
         self.logger.info("Cancelling active evaluations...")
         self.active_games.clear()
