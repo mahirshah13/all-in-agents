@@ -27,10 +27,16 @@ def prepare_white_agent_card(url):
         tags=["general"],
         examples=[],
     )
+    # When running under Agentbeats / a controller, the public URL is injected via
+    # the AGENT_URL environment variable. Prefer that over any local URL derived
+    # from host/port so the card always advertises the correct externally
+    # reachable address (mirrors agentify-example-tau-bench).
+    public_url = os.getenv("AGENT_URL") or url
+
     card = AgentCard(
         name="file_agent",
         description="Test agent from file",
-        url=url,
+        url=public_url,
         version="1.0.0",
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],

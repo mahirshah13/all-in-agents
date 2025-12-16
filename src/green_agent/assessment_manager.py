@@ -51,8 +51,14 @@ def _prepare_green_agent_card(url: str, agent_config: Dict[str, Any]) -> types.A
         examples=[],
     )
 
-    # Agentbeats needs the public controller URL (Cloudflare) rather than http://localhost:8000.
-    public_url = os.getenv("GREEN_AGENT_PUBLIC_URL") or url
+    # Agentbeats / controller deployments need the public controller URL (e.g. Cloudflare)
+    # rather than an internal host like http://localhost:8000.
+    #
+    # Follow the agentify-example-tau-bench pattern:
+    # - If AGENT_URL is set by the controller, always use that for the card URL
+    # - Otherwise, fall back to GREEN_AGENT_PUBLIC_URL if provided
+    # - Finally, fall back to the local server URL
+    public_url = os.getenv("AGENT_URL") or os.getenv("GREEN_AGENT_PUBLIC_URL") or url
 
     return types.AgentCard(
         name=agent_config["name"],
