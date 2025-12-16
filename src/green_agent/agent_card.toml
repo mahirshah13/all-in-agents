@@ -17,20 +17,7 @@ This green agent expects exactly two white agents (montecarlo and maniac)
 to be provided via a <white_agents> JSON list in the task.
 """
 tags = ["green agent", "assessment hosting", "poker"]
-examples = ["""
-Your task is to run a poker evaluation between two white agents.
-
-<white_agents>
-[
-  {
-    "url": "https://EXAMPLE_HOST/agents/MONTECARLO_ID"
-  },
-  {
-    "url": "https://EXAMPLE_HOST/agents/MANIAC_ID"
-  }
-]
-</white_agents>
-"""]
+examples = ["Your task is to run a poker evaluation between two white agents using a <white_agents> JSON list of two agent URLs."]
 
 [agent]
 name = "Poker Assessment Manager"

@@ -367,8 +367,7 @@ class PokerAssessmentManager(AgentExecutor):
         Supports three modes:
         - Local / CLI mode: task data is JSON with a \"task_type\" field.
         - Controller multi-agent mode (preferred): text prompt containing <white_agents> JSON.
-        - Controller single-agent tau-bench mode (<white_agent_url>) is explicitly rejected,
-          because this poker evaluation expects *two* white agents (montecarlo and maniac).
+        - Controller repeated-URL mode: multiple <white_agent_url> blocks, as sent by the platform.
         """
         try:
             # Get the raw user input text from the context
@@ -435,14 +434,48 @@ class PokerAssessmentManager(AgentExecutor):
                 task_data = {"task_type": "evaluation"}
 
             elif "<white_agent_url>" in message_text and "</white_agent_url>" in message_text:
-                # Single-agent tau-bench style is not supported for poker evaluation.
-                # We require two white agents (montecarlo and maniac).
-                self.logger.error(
-                    "Received <white_agent_url> (single-agent) task, but poker evaluation "
-                    "requires exactly two white agents. Please send a <white_agents> JSON "
-                    "list with two agents (montecarlo and maniac)."
+                # Platform style: multiple <white_agent_url> blocks, each containing a URL.
+                import re
+
+                urls = re.findall(
+                    r"<white_agent_url>\s*(.*?)\s*</white_agent_url>",
+                    message_text,
+                    re.DOTALL,
                 )
-                return
+                # Strip whitespace from each URL and drop empties
+                urls = [u.strip() for u in urls if u.strip()]
+
+                if len(urls) != 2:
+                    self.logger.error(
+                        "Poker evaluation requires exactly two white agents (montecarlo and maniac); "
+                        f"received {len(urls)} <white_agent_url> blocks"
+                    )
+                    return
+
+                # Map the two URLs to montecarlo and maniac by default
+                new_white_agents: Dict[str, WhiteAgentConfig] = {}
+                ids = ["montecarlo", "maniac"]
+                for idx, url in enumerate(urls):
+                    aid = ids[idx]
+                    aname = "Monte Carlo" if aid == "montecarlo" else "Maniac"
+                    atype = aid
+                    new_white_agents[aid] = WhiteAgentConfig(
+                        id=aid,
+                        name=aname,
+                        type=atype,
+                        url=url,
+                        config={},
+                    )
+
+                self.white_agents = new_white_agents
+                self.all_available_agents = dict(new_white_agents)
+
+                self.print_status(
+                    f"Configured 2 remote white agents from repeated <white_agent_url> blocks"
+                )
+
+                task_type = "evaluation"
+                task_data = {"task_type": "evaluation"}
 
             else:
                 # Local / JSON task mode: parse as JSON if possible
